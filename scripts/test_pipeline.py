@@ -353,7 +353,7 @@ def main():
 
     # Setup logger
     logger = setup_logger("test_pipeline")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     logger.info("=" * 80)
     logger.info("GMM-MDN Pipeline Test")
