@@ -50,6 +50,8 @@ def create_attribute_group(row) -> str:
     Create attribute group from structured fields.
 
     Uses gender, pitch, and speaking_rate fields (excludes age due to None values).
+    Dataset fields: gender (male/female), pitch (high/medium/low), speaking_rate (fast/measured/slow)
+    Output format: "male, high-pitched, fast speed"
 
     Args:
         row: DataFrame row with gender, pitch, speaking_rate fields
@@ -58,36 +60,26 @@ def create_attribute_group(row) -> str:
         Attribute group string (e.g., "male, medium-pitched, measured speed")
         Returns None if any required field is missing/invalid
     """
-    gender = row.get('gender')
-    pitch = row.get('pitch')
-    speaking_rate = row.get('speaking_rate')
+    # Access pandas Series values correctly
+    try:
+        gender = row['gender'] if pd.notna(row['gender']) else None
+        pitch = row['pitch'] if pd.notna(row['pitch']) else None
+        speaking_rate = row['speaking_rate'] if pd.notna(row['speaking_rate']) else None
+    except:
+        return None
 
     # Validate all required fields are present
     if not gender or not pitch or not speaking_rate:
         return None
 
-    # Map speaking_rate to our expected format
-    if speaking_rate == "fast":
-        rate = "fast speed"
-    elif speaking_rate == "slow":
-        rate = "slow speed"
-    elif speaking_rate == "measured":
-        rate = "measured speed"
-    else:
-        return None
+    # Map pitch to our expected format: "high" -> "high-pitched"
+    pitch_str = f"{pitch}-pitched"
 
-    # Map pitch to our expected format
-    if pitch == "high":
-        pitch = "high-pitched"
-    elif pitch == "medium":
-        pitch = "medium-pitched"
-    elif pitch == "low":
-        pitch = "low-pitched"
-    else:
-        return None
+    # Map speaking_rate to our expected format: "fast" -> "fast speed"
+    rate_str = f"{speaking_rate} speed"
 
-    # Construct attribute group
-    attr_group = f"{gender}, {pitch}, {rate}"
+    # Construct attribute group: "male, high-pitched, fast speed"
+    attr_group = f"{gender}, {pitch_str}, {rate_str}"
 
     # Validate it's in our predefined groups
     if attr_group in ATTRIBUTE_GROUPS:
