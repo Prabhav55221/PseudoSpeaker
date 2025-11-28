@@ -85,6 +85,9 @@ class GMMMDN(nn.Module):
         # Initialize weights
         self._init_weights()
 
+        # Move all layers to device
+        self.to(device)
+
     def _init_weights(self):
         """Initialize MDN head weights."""
         for module in self.mdn_head.modules():
