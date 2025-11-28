@@ -60,7 +60,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def test_embedding_loader(embedding_dir, logger):
+def test_embedding_loader(embedding_dir, mapping_dir, logger):
     """Test HyperionEmbeddingLoader."""
     logger.info("\n" + "=" * 80)
     logger.info("TEST 1: Embedding Loader")
@@ -70,8 +70,18 @@ def test_embedding_loader(embedding_dir, logger):
 
     logger.info(f"✓ Successfully initialized embedding loader")
 
-    # Test single embedding load with a known audio ID
-    test_id = "id10230-WxmrMgdkqOw-00004.wav"
+    # Get a real audio ID from the prepared dataset
+    import json
+    train_json = Path(mapping_dir) / "train.json"
+    with open(train_json, 'r') as f:
+        train_data = json.load(f)
+
+    if len(train_data) == 0:
+        raise ValueError("No samples in train.json")
+
+    # Use first sample's audio_id
+    test_id = train_data[0]["audio_id"]
+    logger.info(f"Using test ID from dataset: {test_id}")
 
     # DO NOT CATCH ERRORS - let them fail the test
     embedding = loader.load_embedding(test_id)
@@ -355,7 +365,7 @@ def main():
 
     try:
         # Run tests
-        embedding_loader = test_embedding_loader(args.embedding_dir, logger)
+        embedding_loader = test_embedding_loader(args.embedding_dir, args.mapping_dir, logger)
         text_encoder = test_text_encoder(args.device, logger)
         test_gmm_utils(args.device, logger)
         model = test_model(args.device, logger)
