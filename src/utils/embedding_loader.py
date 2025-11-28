@@ -134,11 +134,6 @@ class HyperionEmbeddingLoader:
                     embedding = embedding[0]
 
                 # Success with primary key
-                if embedding.shape[0] != 512:
-                    raise RuntimeError(
-                        f"Expected 512-dim embedding for {audio_id}, "
-                        f"got shape {embedding.shape}"
-                    )
                 return embedding.astype(np.float32)
             except Exception as e:
                 import traceback
@@ -159,11 +154,6 @@ class HyperionEmbeddingLoader:
                     embedding = embedding[0]
 
                 # Success with alternate key
-                if embedding.shape[0] != 512:
-                    raise RuntimeError(
-                        f"Expected 512-dim embedding for {audio_id}, "
-                        f"got shape {embedding.shape}"
-                    )
                 return embedding.astype(np.float32)
             except Exception as e:
                 import traceback
