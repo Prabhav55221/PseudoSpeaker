@@ -137,7 +137,20 @@ class HyperionEmbeddingLoader:
         ark_file, byte_offset = self.metadata[audio_id]
 
         reader = self._get_reader(ark_file)
-        embedding = reader.read([audio_id])[0]
+
+        # Try with and without .wav extension
+        key = audio_id.replace('.wav', '') if audio_id.endswith('.wav') else audio_id
+        result = reader.read([key])
+
+        if result is None or len(result) == 0:
+            # Try with .wav extension if it didn't work without
+            key_alt = audio_id if audio_id.endswith('.wav') else f"{audio_id}.wav"
+            result = reader.read([key_alt])
+
+        if result is None or len(result) == 0:
+            raise RuntimeError(f"Failed to read embedding for {audio_id} (tried keys: {key}, {key_alt})")
+
+        embedding = result[0]
 
         # Validate embedding shape
         if embedding.shape[0] != 512:
