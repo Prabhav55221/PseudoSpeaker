@@ -34,6 +34,7 @@ class HyperionEmbeddingLoader:
 
         # Create reader using main xvector.csv
         self.reader = None
+        self.recipe_root = None  # Will be set in _load_ark_files
         self._load_ark_files()
 
     def _load_ark_files(self):
@@ -41,8 +42,11 @@ class HyperionEmbeddingLoader:
         Load embeddings using Hyperion's RandomAccessDataReaderFactory.
 
         Uses the main xvector.csv file which indexes all ARK files.
-        Hyperion auto-detects CSV format from the file.
+        The CSV contains relative paths to ARK files that are relative to the recipe root.
+        We need to change directory to the recipe root before creating the reader.
         """
+        import os
+
         # Use the main xvector.csv file (not the individual xvector.1.csv, etc.)
         main_csv = self.embedding_dir / "xvector.csv"
 
@@ -51,11 +55,38 @@ class HyperionEmbeddingLoader:
 
         self.logger.info(f"Loading embeddings from: {main_csv}")
 
+        # The CSV paths are relative to the recipe root directory
+        # embedding_dir format: .../recipes/voxceleb_eval/v3.6.xs/exp/xvectors/.../CapSpeech-real
+        # recipe_root is: .../recipes/voxceleb_eval/v3.6.xs/
+        # We need to find the recipe root by going up to the 'exp' directory
+
+        embedding_dir_str = str(self.embedding_dir)
+        if '/exp/' in embedding_dir_str:
+            self.recipe_root = embedding_dir_str.split('/exp/')[0]
+        else:
+            # Fallback: assume embedding_dir itself contains the ARK files
+            self.recipe_root = str(self.embedding_dir)
+
+        self.logger.info(f"Recipe root directory: {self.recipe_root}")
+
         try:
-            # Pass path directly - Hyperion auto-detects the CSV format
-            # Matches the pattern from old code: reader = DRF.create(feats_file)
-            self.reader = DRF.create(str(main_csv))
-            self.logger.info(f"Successfully loaded embedding reader")
+            # Save current directory
+            original_dir = os.getcwd()
+
+            # Change to recipe root so relative paths in CSV resolve correctly
+            os.chdir(self.recipe_root)
+            self.logger.info(f"Changed working directory to: {self.recipe_root}")
+
+            try:
+                # Pass path directly - Hyperion auto-detects the CSV format
+                # Matches the pattern from old code: reader = DRF.create(feats_file)
+                self.reader = DRF.create(str(main_csv))
+                self.logger.info(f"Successfully loaded embedding reader")
+            finally:
+                # Always restore original directory
+                os.chdir(original_dir)
+                self.logger.info(f"Restored working directory to: {original_dir}")
+
         except Exception as e:
             raise ValueError(f"Failed to load xvector.csv: {e}")
 
@@ -81,42 +112,47 @@ class HyperionEmbeddingLoader:
             key = f"{audio_id}.wav"  # add .wav
             key_alt = audio_id  # keep as-is
 
-        # Try primary key
-        try:
-            self.logger.info(f"Attempting to load embedding with key: '{key}'")
-            embedding = self.reader.read([key], squeeze=True)
-            self.logger.info(f"Reader returned: {type(embedding)}, shape={embedding.shape if hasattr(embedding, 'shape') else 'N/A'}")
-            if embedding is not None and embedding.size > 0:
-                # Success with primary key
-                if embedding.shape[0] != 512:
-                    raise RuntimeError(
-                        f"Expected 512-dim embedding for {audio_id}, "
-                        f"got {embedding.shape[0]}"
-                    )
-                self.logger.info(f"Successfully loaded embedding with key: '{key}'")
-                return embedding.astype(np.float32)
-        except Exception as e:
-            self.logger.error(f"Failed to load with key '{key}': {type(e).__name__}: {e}")
+        import os
 
-        # Try alternate key
-        try:
-            self.logger.info(f"Attempting to load embedding with alternate key: '{key_alt}'")
-            embedding = self.reader.read([key_alt], squeeze=True)
-            self.logger.info(f"Reader returned: {type(embedding)}, shape={embedding.shape if hasattr(embedding, 'shape') else 'N/A'}")
-            if embedding is not None and embedding.size > 0:
-                # Success with alternate key
-                if embedding.shape[0] != 512:
-                    raise RuntimeError(
-                        f"Expected 512-dim embedding for {audio_id}, "
-                        f"got {embedding.shape[0]}"
-                    )
-                self.logger.info(f"Successfully loaded embedding with alternate key: '{key_alt}'")
-                return embedding.astype(np.float32)
-        except Exception as e:
-            self.logger.error(f"Failed to load with alternate key '{key_alt}': {type(e).__name__}: {e}")
+        # Need to be in recipe root directory for ARK file paths to resolve
+        original_dir = os.getcwd()
 
-        # Both attempts failed
-        raise KeyError(f"Audio ID not found: {audio_id} (tried: {key}, {key_alt})")
+        try:
+            os.chdir(self.recipe_root)
+
+            # Try primary key
+            try:
+                embedding = self.reader.read([key], squeeze=True)
+                if embedding is not None and embedding.size > 0:
+                    # Success with primary key
+                    if embedding.shape[0] != 512:
+                        raise RuntimeError(
+                            f"Expected 512-dim embedding for {audio_id}, "
+                            f"got {embedding.shape[0]}"
+                        )
+                    return embedding.astype(np.float32)
+            except Exception as e:
+                self.logger.debug(f"Failed to load with key '{key}': {type(e).__name__}: {e}")
+
+            # Try alternate key
+            try:
+                embedding = self.reader.read([key_alt], squeeze=True)
+                if embedding is not None and embedding.size > 0:
+                    # Success with alternate key
+                    if embedding.shape[0] != 512:
+                        raise RuntimeError(
+                            f"Expected 512-dim embedding for {audio_id}, "
+                            f"got {embedding.shape[0]}"
+                        )
+                    return embedding.astype(np.float32)
+            except Exception as e:
+                self.logger.debug(f"Failed to load with alternate key '{key_alt}': {type(e).__name__}: {e}")
+
+            # Both attempts failed
+            raise KeyError(f"Audio ID not found: {audio_id} (tried: {key}, {key_alt})")
+
+        finally:
+            os.chdir(original_dir)
 
     def load_batch(self, audio_ids: list[str]) -> np.ndarray:
         """
