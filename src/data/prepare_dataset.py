@@ -50,8 +50,10 @@ def create_attribute_group(row) -> str:
     Create attribute group from structured fields.
 
     Uses gender, pitch, and speaking_rate fields (excludes age due to None values).
-    Dataset fields: gender (male/female), pitch (high/medium/low), speaking_rate (fast/measured/slow)
-    Output format: "male, high-pitched, fast speed"
+    Dataset fields are already in final format:
+    - gender: "male" or "female"
+    - pitch: "high-pitched", "medium-pitched", or "low-pitched"
+    - speaking_rate: "fast speed", "measured speed", or "slow speed"
 
     Args:
         row: DataFrame row with gender, pitch, speaking_rate fields
@@ -72,14 +74,8 @@ def create_attribute_group(row) -> str:
     if not gender or not pitch or not speaking_rate:
         return None
 
-    # Map pitch to our expected format: "high" -> "high-pitched"
-    pitch_str = f"{pitch}-pitched"
-
-    # Map speaking_rate to our expected format: "fast" -> "fast speed"
-    rate_str = f"{speaking_rate} speed"
-
-    # Construct attribute group: "male, high-pitched, fast speed"
-    attr_group = f"{gender}, {pitch_str}, {rate_str}"
+    # Values are already in the correct format, just combine them
+    attr_group = f"{gender}, {pitch}, {speaking_rate}"
 
     # Validate it's in our predefined groups
     if attr_group in ATTRIBUTE_GROUPS:
