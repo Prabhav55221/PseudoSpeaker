@@ -14,10 +14,6 @@ import pandas as pd
 from hyperion.io import RandomAccessDataReader
 
 
-# Sources with available embeddings (LibriTTS-R excluded)
-VALID_SOURCES = {"voxceleb", "ears", "expresso"}
-
-
 class HyperionEmbeddingLoader:
     """
     Loader for x-vector embeddings stored in Kaldi ARK format.
@@ -51,7 +47,7 @@ class HyperionEmbeddingLoader:
         Load metadata from CSV files in embedding directory.
 
         CSV format: id, storage_path, storage_byte, speech_duration
-        Filters to only include valid sources (voxceleb, ears, expresso).
+        Loads all embeddings - filtering by source is done at dataset level.
         """
         csv_files = sorted(self.embedding_dir.glob("*.csv"))
 
@@ -61,7 +57,7 @@ class HyperionEmbeddingLoader:
         self.logger.info(f"Loading metadata from {len(csv_files)} CSV files...")
 
         total_loaded = 0
-        filtered_count = 0
+        missing_files = 0
 
         for csv_file in csv_files:
             df = pd.read_csv(csv_file)
@@ -75,16 +71,9 @@ class HyperionEmbeddingLoader:
                 )
                 continue
 
-            # Filter to valid sources
+            # Load all embeddings
             for _, row in df.iterrows():
                 audio_id = row["id"]
-
-                # Extract source from audio_id (format: source_*)
-                source = audio_id.split("_")[0]
-
-                if source not in VALID_SOURCES:
-                    filtered_count += 1
-                    continue
 
                 # storage_path can be absolute or relative
                 storage_path = row["storage_path"]
@@ -93,18 +82,19 @@ class HyperionEmbeddingLoader:
 
                 # Validate ARK file exists
                 if not ark_file.exists():
-                    self.logger.warning(
-                        f"ARK file not found for {audio_id}: {ark_file}"
-                    )
+                    missing_files += 1
+                    if missing_files <= 3:  # Only log first few
+                        self.logger.warning(
+                            f"ARK file not found for {audio_id}: {ark_file}"
+                        )
                     continue
 
                 self.metadata[audio_id] = (ark_file, byte_offset)
                 total_loaded += 1
 
-        self.logger.info(
-            f"Loaded metadata for {total_loaded:,} embeddings "
-            f"({filtered_count:,} filtered from invalid sources)"
-        )
+        self.logger.info(f"Loaded metadata for {total_loaded:,} embeddings")
+        if missing_files > 0:
+            self.logger.warning(f"{missing_files:,} embeddings skipped (ARK files not found)")
 
         if total_loaded == 0:
             raise ValueError("No valid embeddings found!")
