@@ -41,7 +41,7 @@ class HyperionEmbeddingLoader:
         Load embeddings using Hyperion's RandomAccessDataReaderFactory.
 
         Uses the main xvector.csv file which indexes all ARK files.
-        Kaldi format specifier: scp = script file (CSV index)
+        Hyperion auto-detects CSV format from the file.
         """
         # Use the main xvector.csv file (not the individual xvector.1.csv, etc.)
         main_csv = self.embedding_dir / "xvector.csv"
@@ -52,10 +52,9 @@ class HyperionEmbeddingLoader:
         self.logger.info(f"Loading embeddings from: {main_csv}")
 
         try:
-            # Use Kaldi scp (script) format specifier
-            # Format: scp:path/to/file.csv
-            feats_file = f"scp:{main_csv}"
-            self.reader = DRF.create(feats_file)
+            # Pass path directly - Hyperion auto-detects the CSV format
+            # Matches the pattern from old code: reader = DRF.create(feats_file)
+            self.reader = DRF.create(str(main_csv))
             self.logger.info(f"Successfully loaded embedding reader")
         except Exception as e:
             raise ValueError(f"Failed to load xvector.csv: {e}")
@@ -84,7 +83,9 @@ class HyperionEmbeddingLoader:
 
         # Try primary key
         try:
+            self.logger.info(f"Attempting to load embedding with key: '{key}'")
             embedding = self.reader.read([key], squeeze=True)
+            self.logger.info(f"Reader returned: {type(embedding)}, shape={embedding.shape if hasattr(embedding, 'shape') else 'N/A'}")
             if embedding is not None and embedding.size > 0:
                 # Success with primary key
                 if embedding.shape[0] != 512:
@@ -92,13 +93,16 @@ class HyperionEmbeddingLoader:
                         f"Expected 512-dim embedding for {audio_id}, "
                         f"got {embedding.shape[0]}"
                     )
+                self.logger.info(f"Successfully loaded embedding with key: '{key}'")
                 return embedding.astype(np.float32)
         except Exception as e:
-            self.logger.debug(f"Failed to load with key '{key}': {e}")
+            self.logger.error(f"Failed to load with key '{key}': {type(e).__name__}: {e}")
 
         # Try alternate key
         try:
+            self.logger.info(f"Attempting to load embedding with alternate key: '{key_alt}'")
             embedding = self.reader.read([key_alt], squeeze=True)
+            self.logger.info(f"Reader returned: {type(embedding)}, shape={embedding.shape if hasattr(embedding, 'shape') else 'N/A'}")
             if embedding is not None and embedding.size > 0:
                 # Success with alternate key
                 if embedding.shape[0] != 512:
@@ -106,9 +110,10 @@ class HyperionEmbeddingLoader:
                         f"Expected 512-dim embedding for {audio_id}, "
                         f"got {embedding.shape[0]}"
                     )
+                self.logger.info(f"Successfully loaded embedding with alternate key: '{key_alt}'")
                 return embedding.astype(np.float32)
         except Exception as e:
-            self.logger.debug(f"Failed to load with key '{key_alt}': {e}")
+            self.logger.error(f"Failed to load with alternate key '{key_alt}': {type(e).__name__}: {e}")
 
         # Both attempts failed
         raise KeyError(f"Audio ID not found: {audio_id} (tried: {key}, {key_alt})")
