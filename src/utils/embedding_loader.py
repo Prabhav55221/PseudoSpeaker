@@ -122,8 +122,14 @@ class HyperionEmbeddingLoader:
 
             # Try primary key
             try:
-                embedding = self.reader.read([key], squeeze=True)
+                # Don't use squeeze=True - it squeezes the wrong dimension
+                # Instead, manually get the first element
+                embedding = self.reader.read([key])
                 if embedding is not None and embedding.size > 0:
+                    # Get first element (batch size 1)
+                    if len(embedding.shape) > 1:
+                        embedding = embedding[0]
+
                     # Success with primary key
                     if embedding.shape[0] != 512:
                         raise RuntimeError(
@@ -138,8 +144,13 @@ class HyperionEmbeddingLoader:
 
             # Try alternate key
             try:
-                embedding = self.reader.read([key_alt], squeeze=True)
+                # Don't use squeeze=True - it squeezes the wrong dimension
+                embedding = self.reader.read([key_alt])
                 if embedding is not None and embedding.size > 0:
+                    # Get first element (batch size 1)
+                    if len(embedding.shape) > 1:
+                        embedding = embedding[0]
+
                     # Success with alternate key
                     if embedding.shape[0] != 512:
                         raise RuntimeError(
