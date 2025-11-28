@@ -2,24 +2,23 @@
 Embedding loader for Kaldi ARK format x-vectors using Hyperion.
 
 Loads 512-dimensional x-vector embeddings from CapSpeech dataset.
-Filters to sources with available embeddings (voxceleb, ears, expresso).
+Uses Hyperion's RandomAccessDataReaderFactory for proper ARK file handling.
 """
 
 import logging
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Optional
 import numpy as np
-import pandas as pd
 
-from hyperion.io import RandomAccessDataReader
+from hyperion.io import RandomAccessDataReaderFactory as DRF
 
 
 class HyperionEmbeddingLoader:
     """
     Loader for x-vector embeddings stored in Kaldi ARK format.
 
-    Uses Hyperion's RandomAccessDataReader for efficient loading.
-    Maintains mapping from audio_id to (ark_file, byte_offset).
+    Uses Hyperion's RandomAccessDataReaderFactory for proper ARK handling.
+    Loads from multiple ARK files in the embedding directory.
     """
 
     def __init__(self, embedding_dir: Path, logger: Optional[logging.Logger] = None):
@@ -27,145 +26,93 @@ class HyperionEmbeddingLoader:
         Initialize embedding loader.
 
         Args:
-            embedding_dir: Path to directory containing ARK files and CSVs
+            embedding_dir: Path to directory containing ARK files
             logger: Logger instance (creates default if None)
         """
         self.embedding_dir = Path(embedding_dir)
         self.logger = logger or logging.getLogger(__name__)
 
-        # Mapping: audio_id -> (ark_file_path, byte_offset)
-        self.metadata: Dict[str, Tuple[Path, int]] = {}
+        # Create readers for each ARK file using Hyperion factory
+        self.readers = {}
+        self._load_ark_files()
 
-        # Cache of RandomAccessDataReader instances per ARK file
-        self.readers: Dict[Path, RandomAccessDataReader] = {}
-
-        # Load metadata from CSV files
-        self._load_metadata()
-
-    def _load_metadata(self):
+    def _load_ark_files(self):
         """
-        Load metadata from CSV files in embedding directory.
+        Load ARK files using Hyperion's RandomAccessDataReaderFactory.
 
-        CSV format: id, storage_path, storage_byte, speech_duration
-        Loads all embeddings - filtering by source is done at dataset level.
+        Finds all .ark files in embedding_dir and creates readers for them.
         """
-        csv_files = sorted(self.embedding_dir.glob("*.csv"))
+        ark_files = sorted(self.embedding_dir.glob("xvector.*.ark"))
 
-        if not csv_files:
-            raise ValueError(f"No CSV files found in {self.embedding_dir}")
+        if not ark_files:
+            raise ValueError(f"No xvector ARK files found in {self.embedding_dir}")
 
-        self.logger.info(f"Loading metadata from {len(csv_files)} CSV files...")
+        self.logger.info(f"Loading {len(ark_files)} ARK files...")
 
-        total_loaded = 0
-        missing_files = 0
+        for ark_file in ark_files:
+            try:
+                reader = DRF.create(str(ark_file))
+                self.readers[ark_file] = reader
+                self.logger.info(f"  Loaded: {ark_file.name}")
+            except Exception as e:
+                self.logger.warning(f"  Failed to load {ark_file.name}: {e}")
 
-        for csv_file in csv_files:
-            df = pd.read_csv(csv_file)
+        if not self.readers:
+            raise ValueError("Failed to load any ARK files!")
 
-            # Validate CSV format (actual columns: id, storage_path, storage_byte, speech_duration)
-            required_cols = {"id", "storage_path", "storage_byte"}
-            if not required_cols.issubset(df.columns):
-                self.logger.warning(
-                    f"Skipping {csv_file.name}: missing required columns. "
-                    f"Expected {required_cols}, got {set(df.columns)}"
-                )
-                continue
-
-            # Load all embeddings
-            for _, row in df.iterrows():
-                audio_id = row["id"]
-
-                # storage_path: use absolute if provided, otherwise just the basename in embedding_dir
-                storage_path = row["storage_path"]
-                if Path(storage_path).is_absolute():
-                    ark_file = Path(storage_path)
-                else:
-                    # Use just the filename, not the full relative path
-                    ark_file = self.embedding_dir / Path(storage_path).name
-                byte_offset = int(row["storage_byte"])
-
-                # Validate ARK file exists
-                if not ark_file.exists():
-                    missing_files += 1
-                    if missing_files <= 3:  # Only log first few
-                        self.logger.warning(
-                            f"ARK file not found for {audio_id}: {ark_file}"
-                        )
-                    continue
-
-                self.metadata[audio_id] = (ark_file, byte_offset)
-                total_loaded += 1
-
-        self.logger.info(f"Loaded metadata for {total_loaded:,} embeddings")
-        if missing_files > 0:
-            self.logger.warning(f"{missing_files:,} embeddings skipped (ARK files not found)")
-
-        if total_loaded == 0:
-            raise ValueError("No valid embeddings found!")
-
-    def _get_reader(self, ark_file: Path) -> RandomAccessDataReader:
-        """
-        Get or create RandomAccessDataReader for ARK file.
-
-        Args:
-            ark_file: Path to ARK file
-
-        Returns:
-            RandomAccessDataReader instance (cached)
-        """
-        if ark_file not in self.readers:
-            self.readers[ark_file] = RandomAccessDataReader(str(ark_file))
-        return self.readers[ark_file]
+        self.logger.info(f"Successfully loaded {len(self.readers)} ARK files")
 
     def load_embedding(self, audio_id: str) -> np.ndarray:
         """
         Load x-vector embedding for given audio_id.
 
+        Searches across all ARK files for the embedding.
+
         Args:
-            audio_id: Audio identifier (e.g., "voxceleb_id00001_00001")
+            audio_id: Audio identifier (e.g., "id10230-WxmrMgdkqOw-00004.wav")
 
         Returns:
             X-vector embedding as numpy array (shape: [512])
 
         Raises:
-            KeyError: If audio_id not found in metadata
-            RuntimeError: If embedding loading fails
+            KeyError: If audio_id not found in any ARK file
         """
-        if audio_id not in self.metadata:
-            raise KeyError(f"Audio ID not found: {audio_id}")
+        # Try each reader until we find the embedding
+        for ark_file, reader in self.readers.items():
+            try:
+                # Try with and without .wav extension
+                key = audio_id.replace('.wav', '') if audio_id.endswith('.wav') else audio_id
+                embedding = reader.read([key], squeeze=True)
 
-        ark_file, byte_offset = self.metadata[audio_id]
+                if embedding is not None and embedding.size > 0:
+                    # Validate embedding shape
+                    if embedding.shape[0] != 512:
+                        raise RuntimeError(
+                            f"Expected 512-dim embedding for {audio_id}, "
+                            f"got {embedding.shape[0]}"
+                        )
+                    return embedding.astype(np.float32)
 
-        reader = self._get_reader(ark_file)
+                # Try with .wav extension
+                key_alt = f"{key}.wav" if not audio_id.endswith('.wav') else key[:-4]
+                embedding = reader.read([key_alt], squeeze=True)
 
-        # Try with and without .wav extension
-        key = audio_id.replace('.wav', '') if audio_id.endswith('.wav') else audio_id
-        result = reader.read([key])
+                if embedding is not None and embedding.size > 0:
+                    if embedding.shape[0] != 512:
+                        raise RuntimeError(
+                            f"Expected 512-dim embedding for {audio_id}, "
+                            f"got {embedding.shape[0]}"
+                        )
+                    return embedding.astype(np.float32)
 
-        if result is None or len(result) == 0:
-            # Try with .wav extension if it didn't work without
-            key_alt = audio_id if audio_id.endswith('.wav') else f"{audio_id}.wav"
-            result = reader.read([key_alt])
+            except Exception:
+                continue
 
-        if result is None or len(result) == 0:
-            raise RuntimeError(f"Failed to read embedding for {audio_id} (tried keys: {key}, {key_alt})")
-
-        embedding = result[0]
-
-        # Validate embedding shape
-        if embedding.shape[0] != 512:
-            raise RuntimeError(
-                f"Expected 512-dim embedding for {audio_id}, "
-                f"got {embedding.shape[0]}"
-            )
-
-        return embedding.astype(np.float32)
+        raise KeyError(f"Audio ID not found in any ARK file: {audio_id}")
 
     def load_batch(self, audio_ids: list[str]) -> np.ndarray:
         """
-        Load multiple embeddings efficiently.
-
-        Groups by ARK file to minimize file operations.
+        Load multiple embeddings.
 
         Args:
             audio_ids: List of audio identifiers
@@ -173,37 +120,12 @@ class HyperionEmbeddingLoader:
         Returns:
             Stacked embeddings as numpy array (shape: [N, 512])
         """
-        # Group audio_ids by ARK file
-        ark_groups: Dict[Path, list[str]] = {}
-
-        for audio_id in audio_ids:
-            if audio_id not in self.metadata:
-                raise KeyError(f"Audio ID not found: {audio_id}")
-
-            ark_file, _ = self.metadata[audio_id]
-
-            if ark_file not in ark_groups:
-                ark_groups[ark_file] = []
-            ark_groups[ark_file].append(audio_id)
-
-        # Load embeddings grouped by ARK file
         embeddings = []
+        for audio_id in audio_ids:
+            emb = self.load_embedding(audio_id)
+            embeddings.append(emb)
 
-        for ark_file, ids in ark_groups.items():
-            reader = self._get_reader(ark_file)
-            batch_embeddings = reader.read(ids)
-            embeddings.extend(batch_embeddings)
-
-        # Stack and validate
-        embeddings = np.stack(embeddings, axis=0).astype(np.float32)
-
-        if embeddings.shape != (len(audio_ids), 512):
-            raise RuntimeError(
-                f"Expected shape ({len(audio_ids)}, 512), "
-                f"got {embeddings.shape}"
-            )
-
-        return embeddings
+        return np.stack(embeddings, axis=0).astype(np.float32)
 
     def has_embedding(self, audio_id: str) -> bool:
         """
@@ -215,20 +137,30 @@ class HyperionEmbeddingLoader:
         Returns:
             True if embedding available, False otherwise
         """
-        return audio_id in self.metadata
+        try:
+            self.load_embedding(audio_id)
+            return True
+        except KeyError:
+            return False
 
     def get_available_ids(self) -> list[str]:
         """
         Get list of all audio_ids with available embeddings.
 
+        Note: This is expensive as it requires iterating through all ARK files.
+        Not recommended for large datasets.
+
         Returns:
-            Sorted list of audio identifiers
+            List of audio identifiers
         """
-        return sorted(self.metadata.keys())
+        self.logger.warning("get_available_ids() is expensive and not recommended")
+        # This would require reading all keys from all ARK files
+        # Not implemented - use dataset filtering instead
+        raise NotImplementedError("Use dataset-level filtering instead")
 
     def __len__(self) -> int:
-        """Return number of available embeddings."""
-        return len(self.metadata)
+        """Return number of available embeddings (not implemented)."""
+        raise NotImplementedError("Use dataset-level counting instead")
 
     def close(self):
         """Close all ARK file readers."""
