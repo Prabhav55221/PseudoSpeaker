@@ -23,6 +23,22 @@
 - MLS: `/home/tthebau1/SHADOW/iarpa-arts/recipes/voxceleb_eval/v3.6.xs/exp/xvectors/fbank80_stmn_fwseresnet34.v3.1_arts_srevox.s2/CapSpeech-MLS/`
 - GigaSpeech: `/home/tthebau1/SHADOW/iarpa-arts/recipes/voxceleb_eval/v3.6.xs/exp/xvectors/fbank80_stmn_fwseresnet34.v3.1_arts_srevox.s2/CapSpeech-GigaSpeech/`
 
+**Format:** Kaldi ARK files (binary) with CSV metadata
+**Total x-vectors (Real):** 384,048 embeddings
+**Loading:** Use Hyperion library (https://hyperion-ml.readthedocs.io/en/latest/)
+
+### Dataset Statistics (all-real)
+- **Train:** 303,056 samples
+- **Val:** 17,498 samples
+- **Test:** 19,556 samples
+- **Total:** 340,110 samples
+
+**Grouping Analysis:**
+- Original captions: 174,077 unique (avg 1.74 samples/caption) - TOO SPARSE
+- **Gender+Age+Pitch+Rate:** 222 groups, avg 1,365 samples/group - IDEAL
+- Gender+Age only: 9 groups, avg 33,673 samples/group - too coarse
+- Intrinsic tags: 484 groups, avg 240 samples/group - rich but smaller
+
 ## Current Challenge
 
 - Existing datasets have 1-to-1 mapping: description → single speaker embedding

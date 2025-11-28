@@ -5,13 +5,15 @@ Usage: python analyze_capspeech.py
 """
 
 import sys
+import os
+from pathlib import Path
 from collections import Counter
 from datasets import load_from_disk
 import json
 
-# Paths
-DATA_PATH = "/export/corpora7/CapSpeech-real/all-real"
-EMBEDDING_PATH = "/home/tthebau1/SHADOW/iarpa-arts/recipes/voxceleb_eval/v3.6.xs/exp/xvectors/fbank80_stmn_fwseresnet34.v3.1_arts_srevox.s2/CapSpeech-real"
+# Paths (using local sshfs mount)
+PROJECT_ROOT = Path(__file__).parent.parent
+DATA_PATH = PROJECT_ROOT / "data"
 
 print("="*80)
 print("CapSpeech Dataset Analysis")
@@ -76,20 +78,9 @@ for i in range(min(2, len(train_ds))):
     print(f"Gender:  {ex.get('gender', 'N/A')} | Age: {ex.get('age', 'N/A')} | Pitch: {ex.get('pitch', 'N/A')}")
     print(f"Tags:    {ex.get('basic_tags', [])[:3]}")
 
-# Check embedding path structure
-print("\n[6] Checking embedding directory...")
-import os
-if os.path.exists(EMBEDDING_PATH):
-    print(f"✓ Embedding path exists: {EMBEDDING_PATH}")
-    # List a few files
-    try:
-        files = os.listdir(EMBEDDING_PATH)[:10]
-        print(f"✓ Found {len(os.listdir(EMBEDDING_PATH))} items")
-        print(f"  Sample files: {files[:5]}")
-    except Exception as e:
-        print(f"✗ Could not list directory: {e}")
-else:
-    print(f"✗ Embedding path not found: {EMBEDDING_PATH}")
+# Skip embedding check for now
+print("\n[6] Embedding analysis...")
+print("  (Skipped - embeddings not mounted yet)")
 
 # Duration statistics
 print("\n[7] Audio duration statistics...")

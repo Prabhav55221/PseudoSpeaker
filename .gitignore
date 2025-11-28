@@ -1,1 +1,56 @@
 .claude
+.embeddings/
+data
+
+# Environment files
+data_augment/.env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+!src/data
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Data and outputs
+outputs/
+prepared_data/
+embeddings/
+*.ark
+*.csv
+!data_augment/.env.example
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model checkpoints
+*.pth
+*.pt
+*.ckpt
+
+# Large files
+*.wav
+*.mp3
+*.npy
