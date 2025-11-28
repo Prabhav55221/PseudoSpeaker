@@ -160,6 +160,13 @@ def parse_args():
         default=5,
         help="Save checkpoint every N epochs (default: 5)"
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=1,
+        help="Verbosity level: (default INFO), -v for INFO, -vv for DEBUG, -q for WARNING"
+    )
 
     # Scheduler and early stopping
     parser.add_argument(
@@ -207,9 +214,17 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Setup logger
+    # Setup logger with verbosity control
     log_file = output_dir / "train.log"
     logger = setup_logger("gmm_mdn", log_file=log_file)
+
+    # Set verbosity level
+    if args.verbose >= 2:
+        logger.setLevel(logging.DEBUG)
+    elif args.verbose >= 1:
+        logger.setLevel(logging.INFO)
+    else:
+        logger.setLevel(logging.WARNING)
 
     logger.info("=" * 80)
     logger.info("GMM-MDN Pseudo-Speaker Generation - Training")
@@ -270,6 +285,30 @@ def main():
         logger.error(f"Mapping files not found in {config.mapping_dir}")
         logger.error("Please run src/data/prepare_dataset.py first to create train/dev/test splits")
         return
+
+    # Auto-detect embedding dimension from data
+    logger.info("\nDetecting embedding dimension...")
+    from src.utils.embedding_loader import HyperionEmbeddingLoader
+    import json
+
+    with open(train_json, 'r') as f:
+        train_data = json.load(f)
+
+    if len(train_data) == 0:
+        logger.error("No samples in train.json")
+        return
+
+    temp_loader = HyperionEmbeddingLoader(config.embedding_dir, logger=logger)
+    test_embedding = temp_loader.load_embedding(train_data[0]["audio_id"])
+    detected_dim = test_embedding.shape[0]
+    temp_loader.close()
+
+    logger.info(f"Detected embedding dimension: {detected_dim}")
+
+    # Override config if different
+    if config.embedding_dim != detected_dim:
+        logger.warning(f"Overriding config embedding_dim ({config.embedding_dim}) with detected dimension ({detected_dim})")
+        config.embedding_dim = detected_dim
 
     # Create dataloaders
     logger.info("\nCreating DataLoaders...")

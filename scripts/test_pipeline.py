@@ -56,6 +56,13 @@ def parse_args():
         default="cuda" if torch.cuda.is_available() else "cpu",
         help="Device (cuda or cpu)"
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Verbosity level: -v for INFO, -vv for DEBUG (default: WARNING)"
+    )
 
     return parser.parse_args()
 
@@ -351,9 +358,14 @@ def test_training_step(model, dataloader, device, logger):
 def main():
     args = parse_args()
 
-    # Setup logger
+    # Setup logger with verbosity control
     logger = setup_logger("test_pipeline")
-    logger.setLevel(logging.DEBUG)
+    if args.verbose >= 2:
+        logger.setLevel(logging.DEBUG)
+    elif args.verbose >= 1:
+        logger.setLevel(logging.INFO)
+    else:
+        logger.setLevel(logging.WARNING)
 
     logger.info("=" * 80)
     logger.info("GMM-MDN Pipeline Test")

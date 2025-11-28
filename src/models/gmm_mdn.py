@@ -123,7 +123,8 @@ class GMMMDN(nn.Module):
 
         # Clone to convert inference tensors to regular tensors for autograd
         # (sentence-transformers uses inference_mode internally)
-        text_embeddings = text_embeddings.clone()
+        # Also move to model's device
+        text_embeddings = text_embeddings.clone().to(self.device)
 
         batch_size = text_embeddings.shape[0]
 

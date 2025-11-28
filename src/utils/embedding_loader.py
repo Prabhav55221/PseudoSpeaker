@@ -136,9 +136,7 @@ class HyperionEmbeddingLoader:
                 # Success with primary key
                 return embedding.astype(np.float32)
             except Exception as e:
-                import traceback
-                self.logger.error(f"Failed to load with key '{key}': {type(e).__name__}: {e}")
-                self.logger.error(f"Traceback: {traceback.format_exc()}")
+                self.logger.debug(f"Failed to load with key '{key}': {type(e).__name__}: {e}")
 
             # Try alternate key
             try:
@@ -156,9 +154,7 @@ class HyperionEmbeddingLoader:
                 # Success with alternate key
                 return embedding.astype(np.float32)
             except Exception as e:
-                import traceback
-                self.logger.error(f"Failed to load with alternate key '{key_alt}': {type(e).__name__}: {e}")
-                self.logger.error(f"Traceback: {traceback.format_exc()}")
+                self.logger.debug(f"Failed to load with alternate key '{key_alt}': {type(e).__name__}: {e}")
 
             # Both attempts failed
             raise KeyError(f"Audio ID not found: {audio_id} (tried: {key}, {key_alt})")
