@@ -75,9 +75,13 @@ class HyperionEmbeddingLoader:
             for _, row in df.iterrows():
                 audio_id = row["id"]
 
-                # storage_path can be absolute or relative
+                # storage_path: use absolute if provided, otherwise just the basename in embedding_dir
                 storage_path = row["storage_path"]
-                ark_file = Path(storage_path) if Path(storage_path).is_absolute() else self.embedding_dir / storage_path
+                if Path(storage_path).is_absolute():
+                    ark_file = Path(storage_path)
+                else:
+                    # Use just the filename, not the full relative path
+                    ark_file = self.embedding_dir / Path(storage_path).name
                 byte_offset = int(row["storage_byte"])
 
                 # Validate ARK file exists
