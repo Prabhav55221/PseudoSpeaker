@@ -69,15 +69,23 @@ class HyperionEmbeddingLoader:
         Raises:
             KeyError: If audio_id not found
         """
-        # Try with and without .wav extension
-        key = audio_id.replace('.wav', '') if audio_id.endswith('.wav') else audio_id
+        # Keys in xvector.csv DO include .wav extension
+        # Try with .wav first (most common case)
+        if audio_id.endswith('.wav'):
+            key = audio_id
+            key_alt = audio_id[:-4]  # without .wav
+        else:
+            key = f"{audio_id}.wav"  # add .wav
+            key_alt = audio_id  # keep as-is
 
         try:
             embedding = self.reader.read([key], squeeze=True)
         except:
-            # Try with .wav extension if failed
-            key = f"{key}.wav" if not audio_id.endswith('.wav') else key[:-4]
-            embedding = self.reader.read([key], squeeze=True)
+            # Try alternate format if first attempt failed
+            try:
+                embedding = self.reader.read([key_alt], squeeze=True)
+            except:
+                raise KeyError(f"Audio ID not found: {audio_id} (tried: {key}, {key_alt})")
 
         if embedding is None or embedding.size == 0:
             raise KeyError(f"Audio ID not found: {audio_id}")
