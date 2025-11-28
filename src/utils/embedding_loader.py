@@ -122,21 +122,24 @@ class HyperionEmbeddingLoader:
 
             # Try primary key
             try:
-                # Don't use squeeze=True - it squeezes the wrong dimension
-                # Instead, manually get the first element
+                # Read returns a list when passed a list of keys
                 embedding = self.reader.read([key])
-                if embedding is not None and embedding.size > 0:
-                    # Get first element (batch size 1)
-                    if len(embedding.shape) > 1:
-                        embedding = embedding[0]
 
-                    # Success with primary key
-                    if embedding.shape[0] != 512:
-                        raise RuntimeError(
-                            f"Expected 512-dim embedding for {audio_id}, "
-                            f"got {embedding.shape[0]}"
-                        )
-                    return embedding.astype(np.float32)
+                # Convert to numpy array if it's a list
+                if isinstance(embedding, list):
+                    embedding = np.array(embedding)
+
+                # Get first element if batch dimension exists
+                if len(embedding.shape) > 1:
+                    embedding = embedding[0]
+
+                # Success with primary key
+                if embedding.shape[0] != 512:
+                    raise RuntimeError(
+                        f"Expected 512-dim embedding for {audio_id}, "
+                        f"got shape {embedding.shape}"
+                    )
+                return embedding.astype(np.float32)
             except Exception as e:
                 import traceback
                 self.logger.error(f"Failed to load with key '{key}': {type(e).__name__}: {e}")
@@ -144,20 +147,24 @@ class HyperionEmbeddingLoader:
 
             # Try alternate key
             try:
-                # Don't use squeeze=True - it squeezes the wrong dimension
+                # Read returns a list when passed a list of keys
                 embedding = self.reader.read([key_alt])
-                if embedding is not None and embedding.size > 0:
-                    # Get first element (batch size 1)
-                    if len(embedding.shape) > 1:
-                        embedding = embedding[0]
 
-                    # Success with alternate key
-                    if embedding.shape[0] != 512:
-                        raise RuntimeError(
-                            f"Expected 512-dim embedding for {audio_id}, "
-                            f"got {embedding.shape[0]}"
-                        )
-                    return embedding.astype(np.float32)
+                # Convert to numpy array if it's a list
+                if isinstance(embedding, list):
+                    embedding = np.array(embedding)
+
+                # Get first element if batch dimension exists
+                if len(embedding.shape) > 1:
+                    embedding = embedding[0]
+
+                # Success with alternate key
+                if embedding.shape[0] != 512:
+                    raise RuntimeError(
+                        f"Expected 512-dim embedding for {audio_id}, "
+                        f"got shape {embedding.shape}"
+                    )
+                return embedding.astype(np.float32)
             except Exception as e:
                 import traceback
                 self.logger.error(f"Failed to load with alternate key '{key_alt}': {type(e).__name__}: {e}")
