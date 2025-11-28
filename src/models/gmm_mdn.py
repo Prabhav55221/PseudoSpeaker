@@ -120,6 +120,11 @@ class GMMMDN(nn.Module):
         """
         # Encode text
         text_embeddings = self.text_encoder(texts)  # [batch_size, text_dim]
+
+        # Clone to convert inference tensors to regular tensors for autograd
+        # (sentence-transformers uses inference_mode internally)
+        text_embeddings = text_embeddings.clone()
+
         batch_size = text_embeddings.shape[0]
 
         # MDN head

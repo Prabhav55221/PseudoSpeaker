@@ -41,6 +41,7 @@ class HyperionEmbeddingLoader:
         Load embeddings using Hyperion's RandomAccessDataReaderFactory.
 
         Uses the main xvector.csv file which indexes all ARK files.
+        Kaldi format specifier: scp = script file (CSV index)
         """
         # Use the main xvector.csv file (not the individual xvector.1.csv, etc.)
         main_csv = self.embedding_dir / "xvector.csv"
@@ -51,7 +52,10 @@ class HyperionEmbeddingLoader:
         self.logger.info(f"Loading embeddings from: {main_csv}")
 
         try:
-            self.reader = DRF.create(str(main_csv))
+            # Use Kaldi scp (script) format specifier
+            # Format: scp:path/to/file.csv
+            feats_file = f"scp:{main_csv}"
+            self.reader = DRF.create(feats_file)
             self.logger.info(f"Successfully loaded embedding reader")
         except Exception as e:
             raise ValueError(f"Failed to load xvector.csv: {e}")
@@ -78,26 +82,36 @@ class HyperionEmbeddingLoader:
             key = f"{audio_id}.wav"  # add .wav
             key_alt = audio_id  # keep as-is
 
+        # Try primary key
         try:
             embedding = self.reader.read([key], squeeze=True)
-        except:
-            # Try alternate format if first attempt failed
-            try:
-                embedding = self.reader.read([key_alt], squeeze=True)
-            except:
-                raise KeyError(f"Audio ID not found: {audio_id} (tried: {key}, {key_alt})")
+            if embedding is not None and embedding.size > 0:
+                # Success with primary key
+                if embedding.shape[0] != 512:
+                    raise RuntimeError(
+                        f"Expected 512-dim embedding for {audio_id}, "
+                        f"got {embedding.shape[0]}"
+                    )
+                return embedding.astype(np.float32)
+        except Exception as e:
+            self.logger.debug(f"Failed to load with key '{key}': {e}")
 
-        if embedding is None or embedding.size == 0:
-            raise KeyError(f"Audio ID not found: {audio_id}")
+        # Try alternate key
+        try:
+            embedding = self.reader.read([key_alt], squeeze=True)
+            if embedding is not None and embedding.size > 0:
+                # Success with alternate key
+                if embedding.shape[0] != 512:
+                    raise RuntimeError(
+                        f"Expected 512-dim embedding for {audio_id}, "
+                        f"got {embedding.shape[0]}"
+                    )
+                return embedding.astype(np.float32)
+        except Exception as e:
+            self.logger.debug(f"Failed to load with key '{key_alt}': {e}")
 
-        # Validate embedding shape
-        if embedding.shape[0] != 512:
-            raise RuntimeError(
-                f"Expected 512-dim embedding for {audio_id}, "
-                f"got {embedding.shape[0]}"
-            )
-
-        return embedding.astype(np.float32)
+        # Both attempts failed
+        raise KeyError(f"Audio ID not found: {audio_id} (tried: {key}, {key_alt})")
 
     def load_batch(self, audio_ids: list[str]) -> np.ndarray:
         """
