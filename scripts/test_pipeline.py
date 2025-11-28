@@ -87,20 +87,21 @@ def test_embedding_loader(embedding_dir, mapping_dir, logger):
     embedding = loader.load_embedding(test_id)
     logger.info(f"✓ Loaded embedding for {test_id}: shape={embedding.shape}, dtype={embedding.dtype}")
 
-    if embedding.shape[0] != 512:
-        raise ValueError(f"Expected 512-dim embedding, got {embedding.shape[0]}")
+    # Get embedding dimension
+    embedding_dim = embedding.shape[0]
+    logger.info(f"  Embedding dimension: {embedding_dim}")
 
     # Test batch loading
     batch_ids = [test_id] * 3  # Same ID multiple times for testing
     batch_embeddings = loader.load_batch(batch_ids)
     logger.info(f"✓ Loaded batch of {len(batch_ids)} embeddings: shape={batch_embeddings.shape}")
 
-    if batch_embeddings.shape != (3, 512):
-        raise ValueError(f"Expected shape (3, 512), got {batch_embeddings.shape}")
+    if batch_embeddings.shape != (3, embedding_dim):
+        raise ValueError(f"Expected shape (3, {embedding_dim}), got {batch_embeddings.shape}")
 
     logger.info("✓ Embedding loader tests passed!")
 
-    return loader
+    return loader, embedding_dim
 
 
 def test_text_encoder(device, logger):
@@ -138,7 +139,7 @@ def test_text_encoder(device, logger):
     return encoder
 
 
-def test_gmm_utils(device, logger):
+def test_gmm_utils(device, embedding_dim, logger):
     """Test GMM utilities."""
     logger.info("\n" + "=" * 80)
     logger.info("TEST 3: GMM Utilities")
@@ -146,7 +147,6 @@ def test_gmm_utils(device, logger):
 
     batch_size = 8
     num_components = 5
-    embedding_dim = 512
 
     # Create random GMM parameters
     weights = torch.randn(batch_size, num_components).to(device)
@@ -185,7 +185,7 @@ def test_gmm_utils(device, logger):
     logger.info("✓ GMM utilities tests passed!")
 
 
-def test_model(device, logger):
+def test_model(device, embedding_dim, logger):
     """Test GMMMDN model."""
     logger.info("\n" + "=" * 80)
     logger.info("TEST 4: GMM-MDN Model")
@@ -193,7 +193,7 @@ def test_model(device, logger):
 
     model = GMMMDN(
         num_components=10,
-        embedding_dim=512,
+        embedding_dim=embedding_dim,
         hidden_dim=256,
         text_encoder_name="all-MiniLM-L6-v2",
         freeze_encoder=True,
@@ -215,7 +215,7 @@ def test_model(device, logger):
         raise ValueError(f"Expected weights shape (2, 10), got {weights.shape}")
 
     # Test loss computation
-    embeddings = torch.randn(2, 512).to(device)
+    embeddings = torch.randn(2, embedding_dim).to(device)
     loss = model.compute_loss(texts, embeddings)
     logger.info(f"✓ Computed loss: {loss.item():.4f}")
 
@@ -226,8 +226,8 @@ def test_model(device, logger):
     samples = model.sample("A male speaker", num_samples=5, temperature=1.0)
     logger.info(f"✓ Sampled embeddings: shape={samples.shape}")
 
-    if samples.shape != (5, 512):
-        raise ValueError(f"Expected shape (5, 512), got {samples.shape}")
+    if samples.shape != (5, embedding_dim):
+        raise ValueError(f"Expected shape (5, {embedding_dim}), got {samples.shape}")
 
     # Test backward pass
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -365,10 +365,12 @@ def main():
 
     try:
         # Run tests
-        embedding_loader = test_embedding_loader(args.embedding_dir, args.mapping_dir, logger)
+        embedding_loader, embedding_dim = test_embedding_loader(args.embedding_dir, args.mapping_dir, logger)
+        logger.info(f"\n✓ Detected embedding dimension: {embedding_dim}\n")
+
         text_encoder = test_text_encoder(args.device, logger)
-        test_gmm_utils(args.device, logger)
-        model = test_model(args.device, logger)
+        test_gmm_utils(args.device, embedding_dim, logger)
+        model = test_model(args.device, embedding_dim, logger)
         dataset, dataloader = test_dataset(args.mapping_dir, args.embedding_dir, logger)
         test_training_step(model, dataloader, args.device, logger)
 

@@ -55,7 +55,7 @@ class GMMMDNConfig:
     text_encoder_name: str = "all-MiniLM-L6-v2"
     freeze_encoder: bool = True
     num_gmm_components: int = 15
-    embedding_dim: int = 512  # X-vector dimension (confirmed from logs)
+    embedding_dim: int = 192  # X-vector dimension (default for CapSpeech embeddings)
     hidden_dim: int = 512
 
     # Training hyperparameters
@@ -108,8 +108,8 @@ class GMMMDNConfig:
         if self.num_gmm_components < 1:
             raise ValueError(f"num_gmm_components must be >= 1, got {self.num_gmm_components}")
 
-        if self.embedding_dim != 512:
-            raise ValueError(f"embedding_dim must be 512 (x-vector dimension), got {self.embedding_dim}")
+        if self.embedding_dim < 1:
+            raise ValueError(f"embedding_dim must be >= 1, got {self.embedding_dim}")
 
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
