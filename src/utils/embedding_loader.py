@@ -50,7 +50,7 @@ class HyperionEmbeddingLoader:
         """
         Load metadata from CSV files in embedding directory.
 
-        CSV format: audio_id, ark_file, byte_offset
+        CSV format: id, storage_path, storage_byte, speech_duration
         Filters to only include valid sources (voxceleb, ears, expresso).
         """
         csv_files = sorted(self.embedding_dir.glob("*.csv"))
@@ -66,8 +66,8 @@ class HyperionEmbeddingLoader:
         for csv_file in csv_files:
             df = pd.read_csv(csv_file)
 
-            # Validate CSV format
-            required_cols = {"audio_id", "ark_file", "byte_offset"}
+            # Validate CSV format (actual columns: id, storage_path, storage_byte, speech_duration)
+            required_cols = {"id", "storage_path", "storage_byte"}
             if not required_cols.issubset(df.columns):
                 self.logger.warning(
                     f"Skipping {csv_file.name}: missing required columns. "
@@ -77,7 +77,7 @@ class HyperionEmbeddingLoader:
 
             # Filter to valid sources
             for _, row in df.iterrows():
-                audio_id = row["audio_id"]
+                audio_id = row["id"]
 
                 # Extract source from audio_id (format: source_*)
                 source = audio_id.split("_")[0]
@@ -86,8 +86,10 @@ class HyperionEmbeddingLoader:
                     filtered_count += 1
                     continue
 
-                ark_file = self.embedding_dir / row["ark_file"]
-                byte_offset = int(row["byte_offset"])
+                # storage_path can be absolute or relative
+                storage_path = row["storage_path"]
+                ark_file = Path(storage_path) if Path(storage_path).is_absolute() else self.embedding_dir / storage_path
+                byte_offset = int(row["storage_byte"])
 
                 # Validate ARK file exists
                 if not ark_file.exists():

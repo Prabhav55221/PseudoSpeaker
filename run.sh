@@ -5,13 +5,12 @@
 # Apache 2.0.
 
 #SBATCH --job-name=gmm_mdn
-#SBATCH --output=logs/gmm_mdn_%j.out
-#SBATCH --error=logs/gmm_mdn_%j.err
-#SBATCH --time=48:00:00
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+
+#SBATCH --nodes=1
+#SBATCH --mem-per-cpu=64G
+#SBATCH --gpus=1
+#SBATCH --partition=gpu-a100
+#SBATCH --account=a100acct
 #SBATCH --mail-user="psingh54@jhu.edu"
 
 # GMM-MDN Training Script for Cluster Execution
@@ -37,12 +36,12 @@ echo "=================================================="
 # ============================================================================
 
 # Project directory
-PROJECT_DIR="/export/fs06/psingh54/PseudoSpeakers"  # UPDATE if needed
+PROJECT_DIR="/export/fs06/psingh54/PseudoSpeakers"
 cd "$PROJECT_DIR"
 
-# Data paths (UPDATE THESE if needed)
-DATA_DIR="$HOME/Documents/JHU/JHUResearch/PseudoSpeakers/data"  # Mounted via sshfs
-EMBEDDING_DIR="$DATA_DIR/embeddings/xvector/CapSpeech-real"
+# Data paths
+DATA_DIR="/export/corpora7/CapSpeech-real/all-real"
+EMBEDDING_DIR="/home/tthebau1/SHADOW/iarpa-arts/recipes/voxceleb_eval/v3.6.xs/exp/xvectors/fbank80_stmn_fwseresnet34.v3.1_arts_srevox.s2/CapSpeech-real"
 AUGMENTED_TEXTS="$PROJECT_DIR/data_augment/augmented_texts.json"
 MAPPING_DIR="$PROJECT_DIR/data/mappings"
 

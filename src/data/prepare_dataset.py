@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple
 from collections import defaultdict
 import pandas as pd
 import argparse
+from datasets import load_from_disk
 
 
 # Sources with available embeddings
@@ -44,44 +45,44 @@ ATTRIBUTE_GROUPS = [
 ]
 
 
-def parse_attributes(caption: str) -> str:
+def create_attribute_group(row) -> str:
     """
-    Extract structured attributes from caption and map to attribute group.
+    Create attribute group from structured fields.
+
+    Uses gender, pitch, and speaking_rate fields (excludes age due to None values).
 
     Args:
-        caption: Original caption from CapSpeech
+        row: DataFrame row with gender, pitch, speaking_rate fields
 
     Returns:
         Attribute group string (e.g., "male, medium-pitched, measured speed")
-        Returns None if attributes don't match any group
+        Returns None if any required field is missing/invalid
     """
-    caption_lower = caption.lower()
+    gender = row.get('gender')
+    pitch = row.get('pitch')
+    speaking_rate = row.get('speaking_rate')
 
-    # Extract gender
-    if "male" in caption_lower and "female" not in caption_lower:
-        gender = "male"
-    elif "female" in caption_lower:
-        gender = "female"
-    else:
+    # Validate all required fields are present
+    if not gender or not pitch or not speaking_rate:
         return None
 
-    # Extract pitch
-    if "high" in caption_lower and "pitch" in caption_lower:
-        pitch = "high-pitched"
-    elif "low" in caption_lower and "pitch" in caption_lower:
-        pitch = "low-pitched"
-    elif "medium" in caption_lower and "pitch" in caption_lower:
-        pitch = "medium-pitched"
-    else:
-        return None
-
-    # Extract speaking rate
-    if "fast" in caption_lower:
+    # Map speaking_rate to our expected format
+    if speaking_rate == "fast":
         rate = "fast speed"
-    elif "slow" in caption_lower:
+    elif speaking_rate == "slow":
         rate = "slow speed"
-    elif "measured" in caption_lower:
+    elif speaking_rate == "measured":
         rate = "measured speed"
+    else:
+        return None
+
+    # Map pitch to our expected format
+    if pitch == "high":
+        pitch = "high-pitched"
+    elif pitch == "medium":
+        pitch = "medium-pitched"
+    elif pitch == "low":
+        pitch = "low-pitched"
     else:
         return None
 
@@ -97,7 +98,7 @@ def parse_attributes(caption: str) -> str:
 
 def load_capspeech_metadata(data_dir: Path) -> pd.DataFrame:
     """
-    Load and combine CapSpeech metadata from all splits.
+    Load and combine CapSpeech metadata from all splits (arrow format).
 
     Args:
         data_dir: Path to CapSpeech-real directory
@@ -108,11 +109,15 @@ def load_capspeech_metadata(data_dir: Path) -> pd.DataFrame:
     dfs = []
 
     for split in ["train", "val", "test"]:
-        csv_path = data_dir / f"{split}.csv"
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Missing CSV: {csv_path}")
+        split_path = data_dir / split
+        if not split_path.exists():
+            raise FileNotFoundError(f"Missing split directory: {split_path}")
 
-        df = pd.read_csv(csv_path)
+        # Load arrow dataset
+        dataset = load_from_disk(str(split_path))
+
+        # Convert to pandas DataFrame
+        df = dataset.to_pandas()
         df["original_split"] = split
         dfs.append(df)
 
@@ -146,7 +151,7 @@ def split_by_speaker(
     Split samples by speaker to prevent data leakage.
 
     Args:
-        samples_by_group: Dict mapping attribute_group -> list of (audio_id, speaker_id)
+        samples_by_group: Dict mapping attribute_group -> list of (audio_path, speaker_id)
         train_ratio: Fraction for training
         dev_ratio: Fraction for dev (remaining goes to test)
         seed: Random seed
@@ -163,8 +168,8 @@ def split_by_speaker(
     for attr_group, samples in samples_by_group.items():
         # Group samples by speaker
         speaker_samples = defaultdict(list)
-        for audio_id, speaker_id in samples:
-            speaker_samples[speaker_id].append(audio_id)
+        for audio_path, speaker_id in samples:
+            speaker_samples[speaker_id].append(audio_path)
 
         # Get unique speakers
         speakers = list(speaker_samples.keys())
@@ -199,10 +204,10 @@ def create_training_samples(
     """
     Create training samples with augmented text variants.
 
-    For each audio_id in a group, create N samples (one per text variant).
+    For each audio_path in a group, create N samples (one per text variant).
 
     Args:
-        split_groups: Dict mapping attribute_group -> list of audio_ids
+        split_groups: Dict mapping attribute_group -> list of audio_paths
         augmented_texts: Dict mapping attribute_group -> list of text variants
 
     Returns:
@@ -210,18 +215,18 @@ def create_training_samples(
     """
     samples = []
 
-    for attr_group, audio_ids in split_groups.items():
+    for attr_group, audio_paths in split_groups.items():
         text_variants = augmented_texts.get(attr_group, [])
 
         if not text_variants:
             print(f"Warning: No text variants for group '{attr_group}', skipping")
             continue
 
-        # Create samples: each audio_id paired with each text variant
-        for audio_id in audio_ids:
+        # Create samples: each audio_path paired with each text variant
+        for audio_path in audio_paths:
             for text in text_variants:
                 samples.append({
-                    "audio_id": audio_id,
+                    "audio_id": audio_path,  # Keep key as audio_id for compatibility
                     "text": text,
                     "attribute_group": attr_group
                 })
@@ -288,25 +293,33 @@ def main():
 
     # Filter to valid sources
     print("\n2. Filtering to sources with embeddings...")
-    df["source"] = df["audio_id"].str.split("_").str[0]
+    # Check if source field exists, otherwise derive from audio_path
+    if "source" not in df.columns:
+        df["source"] = df["audio_path"].str.split("_").str[0]
     df_filtered = df[df["source"].isin(VALID_SOURCES)].copy()
     print(f"   Filtered samples: {len(df_filtered):,}")
     print(f"   Sources: {sorted(df_filtered['source'].unique())}")
 
-    # Parse attributes and create groups
-    print("\n3. Parsing attributes and creating groups...")
-    df_filtered["attribute_group"] = df_filtered["caption"].apply(parse_attributes)
+    # Create attribute groups from structured fields
+    print("\n3. Creating attribute groups from structured fields...")
+    df_filtered["attribute_group"] = df_filtered.apply(create_attribute_group, axis=1)
     df_filtered = df_filtered[df_filtered["attribute_group"].notna()].copy()
     print(f"   Samples with valid attributes: {len(df_filtered):,}")
     print(f"   Attribute groups: {df_filtered['attribute_group'].nunique()}")
 
+    # Check for speaker_id field or derive it
+    if "speaker_id" not in df_filtered.columns:
+        print("   Note: speaker_id field not found, deriving from audio_path")
+        # Extract speaker ID from audio_path (format: source_speakerID_utteranceID)
+        df_filtered["speaker_id"] = df_filtered["audio_path"].str.split("_").str[1]
+
     # Group samples by attribute group
     samples_by_group = defaultdict(list)
     for _, row in df_filtered.iterrows():
-        audio_id = row["audio_id"]
+        audio_path = row["audio_path"]
         speaker_id = row["speaker_id"]
         attr_group = row["attribute_group"]
-        samples_by_group[attr_group].append((audio_id, speaker_id))
+        samples_by_group[attr_group].append((audio_path, speaker_id))
 
     # Show group statistics
     print("\n   Samples per group:")
