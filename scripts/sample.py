@@ -84,6 +84,13 @@ def parse_args():
         action="store_true",
         help="Save GMM parameters (weights, means, vars) to JSON"
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=1,
+        help="Verbosity level: (default INFO), -v for INFO, -vv for DEBUG"
+    )
 
     return parser.parse_args()
 

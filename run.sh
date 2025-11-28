@@ -52,13 +52,13 @@ mkdir -p logs
 
 # Training hyperparameters
 NUM_GMM_COMPONENTS=15
-BATCH_SIZE=64
+BATCH_SIZE=64  # Increased for A100 80GB (was 64, can handle much more)
 EPOCHS=100
 LR=1e-4
 HIDDEN_DIM=512
 
 # System settings
-NUM_WORKERS=8
+NUM_WORKERS=8  # Increased for better CPU utilization (was 8)
 DEVICE="cuda"
 
 # ============================================================================
@@ -128,7 +128,8 @@ if [ ! -d "$MAPPING_DIR" ] || [ ! -f "$MAPPING_DIR/train.json" ]; then
         --output_dir "$MAPPING_DIR" \
         --train_ratio 0.7 \
         --dev_ratio 0.1 \
-        --seed 42
+        --seed 42 \
+        -vv
 
     echo "✓ Dataset prepared"
 else
@@ -146,7 +147,8 @@ fi
 #     --data_dir "$DATA_DIR" \
 #     --embedding_dir "$EMBEDDING_DIR" \
 #     --mapping_dir "$MAPPING_DIR" \
-#     --device "$DEVICE"
+#     --device "$DEVICE" \
+#     -vv
 
 # ============================================================================
 # Training
@@ -184,7 +186,8 @@ python scripts/train.py \
     --scheduler_patience 5 \
     --scheduler_factor 0.5 \
     --early_stopping_patience 10 \
-    --seed 42
+    --seed 42 \
+    -vv
 
 # ============================================================================
 # Post-training
@@ -208,7 +211,8 @@ python scripts/sample.py \
     --num_samples 10 \
     --temperature 1.0 \
     --output "$OUTPUT_DIR/test_samples.npy" \
-    --save_params
+    --save_params \
+    -vv
 
 echo ""
 echo "Job finished: $(date)"
