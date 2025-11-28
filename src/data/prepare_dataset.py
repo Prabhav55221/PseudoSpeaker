@@ -294,7 +294,20 @@ def main():
 
     # Create attribute groups from structured fields
     print("\n3. Creating attribute groups from structured fields...")
+    print(f"   DEBUG: DataFrame columns: {list(df_filtered.columns)}")
+    print(f"   DEBUG: First row sample:")
+    if len(df_filtered) > 0:
+        first_row = df_filtered.iloc[0]
+        for col in ['gender', 'pitch', 'speaking_rate', 'age', 'audio_path']:
+            if col in df_filtered.columns:
+                print(f"     {col}: {first_row[col]}")
+            else:
+                print(f"     {col}: [COLUMN NOT FOUND]")
+
     df_filtered["attribute_group"] = df_filtered.apply(create_attribute_group, axis=1)
+
+    print(f"   DEBUG: Sample attribute_group values: {df_filtered['attribute_group'].head(10).tolist()}")
+
     df_filtered = df_filtered[df_filtered["attribute_group"].notna()].copy()
     print(f"   Samples with valid attributes: {len(df_filtered):,}")
     print(f"   Attribute groups: {df_filtered['attribute_group'].nunique()}")
