@@ -7,9 +7,9 @@
 #SBATCH --job-name=gmm_mdn
 
 #SBATCH --nodes=1
-#SBATCH --mem-per-cpu=32G
+#SBATCH --mem-per-cpu=16G
 #SBATCH --gpus=1
-#SBATCH --partition=gpu-a100
+#SBATCH --partition=gpu
 #SBATCH --account=a100acct
 #SBATCH --mail-user="psingh54@jhu.edu"
 
@@ -52,13 +52,13 @@ mkdir -p logs
 
 # Training hyperparameters
 NUM_GMM_COMPONENTS=15
-BATCH_SIZE=64  # Increased for A100 80GB (was 64, can handle much more)
+BATCH_SIZE=32  # Increased for A100 80GB (was 64, can handle much more)
 EPOCHS=100
 LR=1e-4
 HIDDEN_DIM=512
 
 # System settings
-NUM_WORKERS=8  # Increased for better CPU utilization (was 8)
+NUM_WORKERS=4  # Increased for better CPU utilization (was 8)
 DEVICE="cuda"
 
 # ============================================================================

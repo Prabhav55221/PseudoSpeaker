@@ -5,6 +5,7 @@ data
 # Environment files
 data_augment/.env
 .env
+*.out
 
 # Python
 __pycache__/
