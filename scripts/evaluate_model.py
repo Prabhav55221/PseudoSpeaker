@@ -96,24 +96,22 @@ def generate_samples(
     logger.info(f"Generating {num_samples} samples for: '{text}'")
 
     with torch.no_grad():
-        # Get GMM parameters
-        means, log_vars, weights = model([text])
-
-        # Convert to numpy
-        means_np = means[0].cpu().numpy()  # [K, D]
-        stds_np = torch.exp(0.5 * log_vars[0]).cpu().numpy()  # [K, D]
-        weights_np = weights[0].cpu().numpy()  # [K]
-
-        # Sample from GMM
+        # Sample from model
         samples = model.sample(
-            means=means,
-            log_vars=log_vars,
-            weights=weights,
+            text=text,
             num_samples=num_samples,
             temperature=temperature
         )
 
         embeddings = samples.cpu().numpy()  # [num_samples, D]
+
+        # Get GMM parameters for analysis
+        weights, means, log_vars = model.get_gmm_params(text)
+
+        # Convert to numpy
+        weights_np = weights.cpu().numpy()  # [K]
+        means_np = means.cpu().numpy()  # [K, D]
+        stds_np = torch.exp(0.5 * log_vars).cpu().numpy()  # [K, D]
 
     gmm_params = {
         'means': means_np,
