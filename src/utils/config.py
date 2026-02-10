@@ -64,6 +64,7 @@ class GMMMDNConfig:
     lr: float = 1e-4
     weight_decay: float = 1e-5
     grad_clip: float = 1.0
+    contrastive_weight: float = 0.0  # Weight for cross-group contrastive loss (0 = disabled)
 
     # System
     device: str = "cuda"

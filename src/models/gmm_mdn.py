@@ -168,6 +168,39 @@ class GMMMDN(nn.Module):
 
         return loss
 
+    def compute_contrastive_loss(
+        self,
+        embeddings: torch.Tensor,
+        group_texts: List[str],
+        target_group_idx: int,
+        temperature: float = 0.07,
+    ) -> torch.Tensor:
+        """
+        Compute contrastive loss: embeddings should be most likely under
+        the correct group's GMM vs all other groups.
+
+        Forwards all group representative texts through the model in one pass,
+        then uses cross-entropy over per-group log-likelihoods.
+
+        Args:
+            embeddings: [B, D] batch embeddings (already on device)
+            group_texts: list of G representative texts (one per group, sorted)
+            target_group_idx: index of the correct group in group_texts
+            temperature: cross-entropy temperature
+
+        Returns:
+            Contrastive loss (scalar)
+        """
+        from .gmm_utils import compute_contrastive_nll
+
+        # Forward all G group texts → [G, K], [G, K, D], [G, K, D]
+        all_weights, all_means, all_log_vars = self.forward(group_texts)
+
+        return compute_contrastive_nll(
+            embeddings, all_weights, all_means, all_log_vars,
+            target_group_idx, temperature,
+        )
+
     def sample(
         self,
         text: str,

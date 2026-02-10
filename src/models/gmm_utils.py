@@ -73,6 +73,70 @@ def compute_gmm_nll(
     return nll
 
 
+def compute_contrastive_nll(
+    embeddings: torch.Tensor,
+    all_weights: torch.Tensor,
+    all_means: torch.Tensor,
+    all_log_vars: torch.Tensor,
+    target_group_idx: int,
+    temperature: float = 0.07,
+) -> torch.Tensor:
+    """
+    Cross-group contrastive loss via GMM log-likelihoods.
+
+    Computes log-likelihood of batch embeddings under each group's GMM,
+    then applies cross-entropy so the correct group has highest likelihood.
+
+    Args:
+        embeddings: [B, D] batch embeddings from one group
+        all_weights: [G, K] mixing coefficients (unnormalized, from forward())
+        all_means: [G, K, D] component means
+        all_log_vars: [G, K, D] component log-variances
+        target_group_idx: correct group index for this batch
+        temperature: cross-entropy temperature (lower = sharper)
+
+    Returns:
+        Cross-entropy loss (scalar)
+    """
+    G, K, D = all_means.shape
+    B = embeddings.shape[0]
+
+    # Normalize weights per group
+    log_weights = F.log_softmax(all_weights, dim=1)  # [G, K]
+
+    # Broadcast: embeddings [B,1,1,D] vs means [1,G,K,D]
+    x = embeddings.unsqueeze(1).unsqueeze(2)          # [B, 1, 1, D]
+    means = all_means.unsqueeze(0)                     # [1, G, K, D]
+    log_vars = all_log_vars.unsqueeze(0)               # [1, G, K, D]
+
+    # Mahalanobis distance
+    diff = x - means                                   # [B, G, K, D]
+    inv_vars = torch.exp(-log_vars)                    # [1, G, K, D]
+    mahal = torch.sum(diff ** 2 * inv_vars, dim=3)     # [B, G, K]
+
+    # Log determinant per component per group
+    log_det = torch.sum(all_log_vars, dim=2)           # [G, K]
+
+    # Log probability per component
+    log_probs = -0.5 * (
+        D * LOG_2PI + log_det.unsqueeze(0) + mahal
+    )  # [B, G, K]
+
+    # Combine with mixing coefficients
+    log_weighted = log_weights.unsqueeze(0) + log_probs  # [B, G, K]
+
+    # Log-sum-exp over components → per-group log-likelihood
+    log_likelihood = torch.logsumexp(log_weighted, dim=2)  # [B, G]
+
+    # Cross-entropy: correct group should score highest
+    targets = torch.full(
+        (B,), target_group_idx, dtype=torch.long, device=embeddings.device
+    )
+    loss = F.cross_entropy(log_likelihood / temperature, targets)
+
+    return loss
+
+
 def sample_from_gmm(
     weights: torch.Tensor,
     means: torch.Tensor,

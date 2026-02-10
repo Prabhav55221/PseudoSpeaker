@@ -4,6 +4,7 @@ Trainer for GMM-MDN model.
 Handles training loop, validation, checkpointing, and early stopping.
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -98,6 +99,24 @@ class Trainer:
         self.current_epoch = 0
         self.global_step = 0
 
+        # Contrastive loss setup
+        self.contrastive_weight = getattr(config, 'contrastive_weight', 0.0)
+        self.group_texts = []
+        self.group_name_to_idx = {}
+
+        if self.contrastive_weight > 0:
+            aug_path = config.augmented_texts_path
+            with open(str(aug_path), 'r') as f:
+                augmented_texts = json.load(f)
+            group_names = sorted(augmented_texts.keys())
+            # One representative text per group (index 0)
+            self.group_texts = [augmented_texts[g][0] for g in group_names]
+            self.group_name_to_idx = {g: i for i, g in enumerate(group_names)}
+            self.logger.info(
+                f"Contrastive loss enabled: weight={self.contrastive_weight}, "
+                f"groups={len(group_names)}"
+            )
+
     def train_epoch(self, epoch: int) -> float:
         """
         Train for one epoch.
@@ -127,8 +146,18 @@ class Trainer:
         for texts, embeddings, audio_ids, attribute_group in pbar:
             embeddings = embeddings.to(self.config.device)
 
-            # Forward pass
-            loss = self.model.compute_loss(texts, embeddings)
+            # Forward pass — NLL loss
+            loss_nll = self.model.compute_loss(texts, embeddings)
+
+            # Contrastive loss
+            loss_contrastive = torch.tensor(0.0, device=self.config.device)
+            if self.contrastive_weight > 0 and attribute_group in self.group_name_to_idx:
+                target_idx = self.group_name_to_idx[attribute_group]
+                loss_contrastive = self.model.compute_contrastive_loss(
+                    embeddings, self.group_texts, target_idx,
+                )
+
+            loss = loss_nll + self.contrastive_weight * loss_contrastive
 
             # Check for NaN loss
             if torch.isnan(loss):
@@ -165,10 +194,14 @@ class Trainer:
             self.metrics_logger.log(prefix="Train")
 
             # Update progress bar
-            pbar.set_postfix({
+            postfix = {
                 'loss': f"{loss.item():.4f}",
-                'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}"
-            })
+                'lr': f"{self.optimizer.param_groups[0]['lr']:.2e}",
+            }
+            if self.contrastive_weight > 0:
+                postfix['nll'] = f"{loss_nll.item():.4f}"
+                postfix['ctr'] = f"{loss_contrastive.item():.4f}"
+            pbar.set_postfix(postfix)
 
         # Average epoch loss
         avg_loss = epoch_loss / num_batches if num_batches > 0 else 0.0

@@ -120,6 +120,12 @@ def parse_args():
         default=1.0,
         help="Gradient clipping max norm (default: 1.0)"
     )
+    parser.add_argument(
+        "--contrastive_weight",
+        type=float,
+        default=0.0,
+        help="Weight for cross-group contrastive loss (0 = disabled) (default: 0.0)"
+    )
 
     # System
     parser.add_argument(
@@ -254,6 +260,7 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay,
         grad_clip=args.grad_clip,
+        contrastive_weight=args.contrastive_weight,
         device=args.device,
         num_workers=args.num_workers,
         seed=args.seed,

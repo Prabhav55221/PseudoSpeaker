@@ -181,6 +181,7 @@ python scripts/train.py \
     --scheduler_patience 5 \
     --scheduler_factor 0.5 \
     --early_stopping_patience 10 \
+    --contrastive_weight 0.1 \
     --seed 42 \
     -vv
 
