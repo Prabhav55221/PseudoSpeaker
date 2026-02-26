@@ -2,28 +2,29 @@
 """
 TTS inference using GMM-MDN pseudo-speaker embeddings + IMS-Toucan.
 
-For each attribute group, samples a pseudo-speaker embedding from the
-trained GMM-MDN, then synthesizes input sentences using IMS-Toucan,
-which natively accepts 192-dim speaker embeddings (same dim as our model).
+Two modes:
 
-Usage:
+  Mode A — online (single env, no version conflicts):
+    Requires avd-hyperion env (has sentence_transformers).
+    Samples embeddings from the GMM-MDN on the fly.
+
     python scripts/tts_inference.py \\
-        --checkpoint outputs/20251128_221541/checkpoints/best_model.pth \\
+        --checkpoint outputs/.../checkpoints/best_model.pth \\
         --augmented_texts data_augment/augmented_texts.json \\
-        --sentences sentences.txt \\
+        --sentences scripts/tts_sentences.txt \\
         --output_dir tts_outputs/ \\
         --toucan_dir /path/to/IMS-Toucan \\
-        --num_samples 3 \\
-        --temperature 1.0
+        --num_samples 3
 
-    # Or synthesize for specific groups only:
-    python scripts/tts_inference.py \\
-        --checkpoint outputs/.../best_model.pth \\
-        --augmented_texts data_augment/augmented_texts.json \\
-        --sentences sentences.txt \\
-        --output_dir tts_outputs/ \\
-        --toucan_dir /path/to/IMS-Toucan \\
-        --groups "male, high pitch, fast" "female, low pitch, slow"
+  Mode B — offline (two-stage, avoids huggingface_hub version conflicts):
+    Step 1: conda activate avd-hyperion
+            python scripts/sample_embeddings.py --checkpoint ... --output_dir emb/
+    Step 2: conda activate toucan
+            python scripts/tts_inference.py \\
+                --embeddings_dir emb/ \\
+                --sentences scripts/tts_sentences.txt \\
+                --output_dir tts_outputs/ \\
+                --toucan_dir /path/to/IMS-Toucan
 """
 
 import argparse
@@ -33,12 +34,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
-
-# Allow imports from project root
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.models.gmm_mdn import GMMMDN
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -50,47 +45,49 @@ def parse_args():
         description="Synthesize speech using GMM-MDN pseudo-speaker embeddings via IMS-Toucan"
     )
 
-    # Model
-    parser.add_argument("--checkpoint", required=True,
-                        help="Path to best_model.pth checkpoint")
-    parser.add_argument("--augmented_texts", required=True,
-                        help="Path to augmented_texts.json (provides group descriptions)")
+    # ── Source of embeddings (mutually exclusive modes) ───────────────────────
+    src = parser.add_mutually_exclusive_group(required=True)
+    src.add_argument("--checkpoint",
+                     help="[Mode A] Path to best_model.pth checkpoint. "
+                          "Requires --augmented_texts. Samples on the fly.")
+    src.add_argument("--embeddings_dir",
+                     help="[Mode B] Directory produced by sample_embeddings.py "
+                          "(contains manifest.json + per-group .npy files). "
+                          "No sentence_transformers import — safe in toucan env.")
+
+    # Mode A extras
+    parser.add_argument("--augmented_texts",
+                        help="[Mode A] Path to augmented_texts.json")
+    parser.add_argument("--num_samples", type=int, default=3,
+                        help="[Mode A] Embeddings to sample per group (default: 3)")
+    parser.add_argument("--temperature", type=float, default=1.0,
+                        help="[Mode A] Sampling temperature (default: 1.0)")
+    parser.add_argument("--text_index", type=int, default=0,
+                        help="[Mode A] Paraphrase index for GMM condition (default: 0)")
 
     # Input sentences
     parser.add_argument("--sentences", required=True,
-                        help="Path to plain-text file with sentences to synthesize (one per line)")
+                        help="Path to plain-text file with sentences (one per line)")
 
     # Output
     parser.add_argument("--output_dir", required=True,
                         help="Directory where WAV files will be saved")
 
-    # IMS-Toucan location
+    # IMS-Toucan
     parser.add_argument("--toucan_dir", required=True,
                         help="Path to cloned IMS-Toucan repository root")
     parser.add_argument("--toucan_model", default="Meta",
-                        help="IMS-Toucan TTS model to use (default: Meta — multilingual)")
+                        help="IMS-Toucan TTS model (default: Meta)")
 
-    # Group selection
+    # Group filter (works in both modes)
     parser.add_argument("--groups", nargs="*", default=None,
-                        help="Attribute groups to synthesize for. Default: all 18 groups. "
-                             "Example: 'male, high pitch, fast' 'female, low pitch, slow'")
-
-    # Sampling
-    parser.add_argument("--num_samples", type=int, default=3,
-                        help="Number of different speaker embeddings to sample per group (default: 3)")
-    parser.add_argument("--temperature", type=float, default=1.0,
-                        help="GMM sampling temperature — higher = more diversity (default: 1.0)")
-    parser.add_argument("--text_index", type=int, default=0,
-                        help="Which paraphrase index from augmented_texts to use as GMM condition "
-                             "(default: 0 — first paraphrase per group)")
+                        help="Groups to synthesize (default: all). "
+                             "Example: 'male, high-pitched, fast speed'")
 
     # System
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu",
-                        help="Device (default: cuda if available)")
-    parser.add_argument("--vocoder", default="default",
-                        help="Vocoder to pass to IMS-Toucan (default: IMS-Toucan default)")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="Enable verbose logging")
+    parser.add_argument("--device", default=None,
+                        help="Device: cuda or cpu (default: cuda if available)")
+    parser.add_argument("-v", "--verbose", action="store_true")
 
     return parser.parse_args()
 
@@ -100,13 +97,22 @@ def parse_args():
 # ──────────────────────────────────────────────────────────────────────────────
 
 def setup_logging(verbose: bool) -> logging.Logger:
-    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         format="%(asctime)s | %(levelname)s | %(message)s",
         datefmt="%H:%M:%S",
-        level=level,
+        level=logging.DEBUG if verbose else logging.INFO,
     )
     return logging.getLogger("tts_inference")
+
+
+def resolve_device(device_arg):
+    if device_arg:
+        return device_arg
+    try:
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        return "cpu"
 
 
 def load_sentences(path: str) -> list:
@@ -119,66 +125,22 @@ def load_sentences(path: str) -> list:
     return sentences
 
 
-def load_group_descriptions(augmented_texts_path: str, text_index: int) -> dict:
-    """
-    Returns {group_name: description_text} using paraphrase at `text_index`.
-    group_name is the JSON key (e.g. 'male, high pitch, fast').
-    """
-    with open(augmented_texts_path) as f:
-        augmented = json.load(f)
-
-    descriptions = {}
-    for group_name, variants in augmented.items():
-        idx = min(text_index, len(variants) - 1)
-        descriptions[group_name] = variants[idx]
-
-    return descriptions
-
-
-def sample_speaker_embedding(
-    model: GMMMDN,
-    description: str,
-    temperature: float,
-    device: str,
-) -> np.ndarray:
-    """
-    Sample a single 192-dim speaker embedding from the GMM conditioned on `description`.
-    Returns numpy array of shape [192].
-    """
-    with torch.no_grad():
-        sample = model.sample(text=description, num_samples=1, temperature=temperature)
-    return sample.squeeze(0).cpu().numpy()  # [192]
+def build_output_filename(group: str, sample_idx: int, sentence_idx: int) -> str:
+    safe_group = group.replace(", ", "_").replace(" ", "_")
+    return f"{safe_group}__s{sample_idx:02d}__utt{sentence_idx:02d}.wav"
 
 
 def import_toucan(toucan_dir: str):
-    """
-    Add IMS-Toucan to sys.path and import the TTS interface.
-    Returns the ToucanTTSInterface class.
-
-    IMS-Toucan exposes a high-level interface in:
-      InferenceInterfaces/ToucanTTSInterface.py
-
-    The class is constructed with:
-      ToucanTTSInterface(device, tts_model_path, vocoder_model_path, faster_vocoder)
-
-    Key methods:
-      tts.set_utterance_embedding(embedding)  -- set speaker embedding [192] numpy
-      tts.read_to_file(texts, path)           -- synthesize list of texts to a single WAV
-      tts(text) -> np.ndarray                 -- synthesize single text, return waveform
-    """
     toucan_path = Path(toucan_dir).resolve()
     if not toucan_path.exists():
         raise FileNotFoundError(f"IMS-Toucan directory not found: {toucan_path}")
-
     interface_file = toucan_path / "InferenceInterfaces" / "ToucanTTSInterface.py"
     if not interface_file.exists():
         raise FileNotFoundError(
             f"ToucanTTSInterface.py not found at {interface_file}. "
             "Make sure you cloned the full IMS-Toucan repo."
         )
-
     sys.path.insert(0, str(toucan_path))
-
     try:
         from InferenceInterfaces.ToucanTTSInterface import ToucanTTSInterface
         return ToucanTTSInterface
@@ -189,10 +151,96 @@ def import_toucan(toucan_dir: str):
         ) from e
 
 
-def build_output_filename(group: str, sample_idx: int, sentence_idx: int) -> str:
-    """Create a safe filename from group name, sample index, and sentence index."""
-    safe_group = group.replace(", ", "_").replace(" ", "_")
-    return f"{safe_group}__s{sample_idx:02d}__utt{sentence_idx:02d}.wav"
+# ──────────────────────────────────────────────────────────────────────────────
+# Mode A — online sampling
+# ──────────────────────────────────────────────────────────────────────────────
+
+def load_online_embeddings(checkpoint, augmented_texts, groups, num_samples,
+                           temperature, text_index, device, log):
+    """
+    Load GMM-MDN and sample embeddings on the fly.
+    Returns: List of (group_name, sample_idx, embedding_np[192])
+    """
+    # Lazy import — only reached in Mode A, not when --embeddings_dir is used
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from src.models.gmm_mdn import GMMMDN  # noqa: PLC0415
+
+    import torch  # noqa: PLC0415
+
+    log.info(f"Loading GMM-MDN checkpoint: {checkpoint}")
+    model, ckpt_meta = GMMMDN.load_checkpoint(checkpoint, device=device)
+    model.eval()
+    log.info(f"  Epoch: {ckpt_meta.get('epoch', '?')}, dim: {model.embedding_dim}")
+    if model.embedding_dim != 192:
+        log.warning(f"Embedding dim={model.embedding_dim} (IMS-Toucan expects 192)")
+
+    with open(augmented_texts) as f:
+        augmented = json.load(f)
+
+    all_groups = sorted(augmented.keys())
+    selected = groups if groups else all_groups
+    missing = [g for g in selected if g not in augmented]
+    if missing:
+        raise ValueError(f"Groups not found in augmented_texts.json: {missing}\n"
+                         f"Available: {all_groups}")
+
+    entries = []
+    for group in selected:
+        variants = augmented[group]
+        description = variants[min(text_index, len(variants) - 1)]
+        log.info(f"  Sampling {num_samples}x for: {group}")
+        for s in range(num_samples):
+            with torch.no_grad():
+                emb = model.sample(text=description, num_samples=1,
+                                   temperature=temperature)
+            emb_np = emb.squeeze(0).cpu().numpy()
+            log.debug(f"    sample {s}: norm={np.linalg.norm(emb_np):.4f}")
+            entries.append((group, s, emb_np))
+
+    return selected, entries
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Mode B — offline (pre-computed embeddings from sample_embeddings.py)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def load_offline_embeddings(embeddings_dir, groups, log):
+    """
+    Load embeddings from a directory produced by sample_embeddings.py.
+    Returns: (selected_groups, List of (group_name, sample_idx, embedding_np[192]))
+    """
+    emb_dir = Path(embeddings_dir)
+    manifest_path = emb_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"manifest.json not found in {emb_dir}. "
+            "Run scripts/sample_embeddings.py first."
+        )
+
+    with open(manifest_path) as f:
+        manifest_data = json.load(f)
+
+    all_groups = manifest_data["groups"]
+    selected = groups if groups else all_groups
+    missing = [g for g in selected if g not in all_groups]
+    if missing:
+        raise ValueError(f"Groups not found in manifest: {missing}\n"
+                         f"Available: {all_groups}")
+
+    manifest = manifest_data["manifest"]
+    entries = []
+    for item in manifest:
+        if item["group"] not in selected:
+            continue
+        npy_path = emb_dir / item["embedding_path"]
+        if not npy_path.exists():
+            raise FileNotFoundError(f"Embedding file missing: {npy_path}")
+        emb_np = np.load(str(npy_path))
+        entries.append((item["group"], item["sample_idx"], emb_np))
+        log.debug(f"  Loaded {npy_path.name}  norm={np.linalg.norm(emb_np):.4f}")
+
+    log.info(f"Loaded {len(entries)} pre-computed embeddings from {emb_dir}")
+    return selected, entries
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -202,135 +250,72 @@ def build_output_filename(group: str, sample_idx: int, sentence_idx: int) -> str
 def main():
     args = parse_args()
     log = setup_logging(args.verbose)
+    device = resolve_device(args.device)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Load GMM-MDN ──────────────────────────────────────────────────────────
-    log.info(f"Loading GMM-MDN checkpoint: {args.checkpoint}")
-    model, ckpt_meta = GMMMDN.load_checkpoint(args.checkpoint, device=args.device)
-    model.eval()
-    log.info(
-        f"Model loaded — epoch {ckpt_meta.get('epoch', '?')}, "
-        f"val_loss {ckpt_meta.get('metrics', {}).get('val_loss', '?'):.4f}"
-        if isinstance(ckpt_meta.get('metrics', {}).get('val_loss'), float)
-        else f"Model loaded — epoch {ckpt_meta.get('epoch', '?')}"
-    )
-
-    embedding_dim = model.embedding_dim
-    log.info(f"Embedding dim: {embedding_dim}")
-    if embedding_dim != 192:
-        log.warning(
-            f"Embedding dim is {embedding_dim}, not 192. "
-            "IMS-Toucan expects 192-dim speaker embeddings. "
-            "Synthesis may produce unexpected results."
+    # ── Load embeddings (one of the two modes) ────────────────────────────────
+    if args.embeddings_dir:
+        log.info(f"[Mode B] Loading pre-computed embeddings from: {args.embeddings_dir}")
+        selected_groups, entries = load_offline_embeddings(
+            args.embeddings_dir, args.groups, log
+        )
+    else:
+        if not args.augmented_texts:
+            raise ValueError("--augmented_texts is required when using --checkpoint")
+        log.info(f"[Mode A] Sampling from checkpoint: {args.checkpoint}")
+        selected_groups, entries = load_online_embeddings(
+            args.checkpoint, args.augmented_texts, args.groups,
+            args.num_samples, args.temperature, args.text_index, device, log
         )
 
-    # ── Load group descriptions ────────────────────────────────────────────────
-    log.info(f"Loading group descriptions from: {args.augmented_texts}")
-    group_descriptions = load_group_descriptions(args.augmented_texts, args.text_index)
-    all_group_names = sorted(group_descriptions.keys())
-    log.info(f"Found {len(all_group_names)} groups: {all_group_names}")
-
-    # Filter to requested groups
-    if args.groups:
-        missing = [g for g in args.groups if g not in group_descriptions]
-        if missing:
-            raise ValueError(
-                f"Requested groups not found in augmented_texts.json: {missing}\n"
-                f"Available groups: {all_group_names}"
-            )
-        selected_groups = args.groups
-        log.info(f"Using {len(selected_groups)} selected groups")
-    else:
-        selected_groups = all_group_names
-        log.info(f"Using all {len(selected_groups)} groups")
-
-    # ── Load sentences ─────────────────────────────────────────────────────────
+    # ── Load sentences ────────────────────────────────────────────────────────
     sentences = load_sentences(args.sentences)
     log.info(f"Loaded {len(sentences)} sentence(s) from {args.sentences}")
-    for i, s in enumerate(sentences):
-        log.debug(f"  [{i}] {s}")
 
-    # ── Load IMS-Toucan ────────────────────────────────────────────────────────
+    # ── Load IMS-Toucan ───────────────────────────────────────────────────────
     log.info(f"Importing IMS-Toucan from: {args.toucan_dir}")
     ToucanTTSInterface = import_toucan(args.toucan_dir)
 
-    log.info(f"Initializing IMS-Toucan (model={args.toucan_model}) on {args.device}…")
-    tts = ToucanTTSInterface(
-        device=args.device,
-        tts_model_path=args.toucan_model,
-    )
+    log.info(f"Initializing IMS-Toucan (model={args.toucan_model}) on {device}…")
+    tts = ToucanTTSInterface(device=device, tts_model_path=args.toucan_model)
     log.info("IMS-Toucan ready.")
 
-    # ── Synthesis loop ─────────────────────────────────────────────────────────
-    total_wavs = len(selected_groups) * args.num_samples * len(sentences)
-    log.info(
-        f"Synthesizing {total_wavs} WAVs "
-        f"({len(selected_groups)} groups × {args.num_samples} samples × {len(sentences)} sentences)"
-    )
+    # ── Synthesis loop ────────────────────────────────────────────────────────
+    total_wavs = len(entries) * len(sentences)
+    log.info(f"Synthesizing {total_wavs} WAVs "
+             f"({len(entries)} embeddings × {len(sentences)} sentences)")
 
     wav_count = 0
-    for group in selected_groups:
-        description = group_descriptions[group]
-        group_dir = output_dir / group.replace(", ", "_").replace(" ", "_")
+    for group, sample_idx, spk_emb in entries:
+        safe_group = group.replace(", ", "_").replace(" ", "_")
+        group_dir = output_dir / safe_group
         group_dir.mkdir(parents=True, exist_ok=True)
-        log.info(f"\nGroup: {group}")
-        log.debug(f"  Description: \"{description}\"")
 
-        for sample_idx in range(args.num_samples):
-            # Sample pseudo-speaker embedding from GMM-MDN
-            spk_embedding = sample_speaker_embedding(
-                model, description, args.temperature, args.device
-            )
-            log.debug(
-                f"  Sample {sample_idx}: embedding norm={np.linalg.norm(spk_embedding):.4f}"
-            )
+        tts.set_utterance_embedding(spk_emb)
 
-            # Set speaker embedding in IMS-Toucan
-            # ToucanTTSInterface.set_utterance_embedding() accepts a 192-dim numpy array
-            tts.set_utterance_embedding(spk_embedding)
-
-            for utt_idx, sentence in enumerate(sentences):
-                out_filename = build_output_filename(group, sample_idx, utt_idx)
-                out_path = group_dir / out_filename
-
-                log.info(f"  [{wav_count+1}/{total_wavs}] {out_filename}")
-                log.debug(f"    Text: \"{sentence}\"")
-
-                # Synthesize and save
-                # IMS-Toucan's read_to_file writes a WAV to the given path.
-                # Pass a list with one sentence so it appends silence-separated utterances.
-                tts.read_to_file(
-                    text_list=[sentence],
-                    file_location=str(out_path),
-                )
-
-                wav_count += 1
+        for utt_idx, sentence in enumerate(sentences):
+            out_filename = build_output_filename(group, sample_idx, utt_idx)
+            out_path = group_dir / out_filename
+            log.info(f"  [{wav_count+1}/{total_wavs}] {out_filename}")
+            log.debug(f"    Text: \"{sentence}\"")
+            tts.read_to_file(text_list=[sentence], file_location=str(out_path))
+            wav_count += 1
 
     log.info(f"\nDone. {wav_count} WAV files saved to: {output_dir}")
 
-    # ── Print summary ──────────────────────────────────────────────────────────
+    # ── Summary ───────────────────────────────────────────────────────────────
     print("\n" + "=" * 60)
     print("TTS Inference Summary")
     print("=" * 60)
-    print(f"Checkpoint : {args.checkpoint}")
+    print(f"Mode       : {'B (pre-computed)' if args.embeddings_dir else 'A (online)'}")
     print(f"Groups     : {len(selected_groups)}")
-    print(f"Samples/grp: {args.num_samples}")
+    print(f"Embeddings : {len(entries)}")
     print(f"Sentences  : {len(sentences)}")
     print(f"Total WAVs : {wav_count}")
     print(f"Output dir : {output_dir.resolve()}")
     print("=" * 60)
-    print("\nDirectory layout:")
-    for group in selected_groups[:3]:
-        safe = group.replace(", ", "_").replace(" ", "_")
-        print(f"  {output_dir}/{safe}/")
-        for s in range(min(2, args.num_samples)):
-            for u in range(min(2, len(sentences))):
-                print(f"    {build_output_filename(group, s, u)}")
-    if len(selected_groups) > 3:
-        print(f"  ... ({len(selected_groups) - 3} more groups)")
-    print()
 
 
 if __name__ == "__main__":
