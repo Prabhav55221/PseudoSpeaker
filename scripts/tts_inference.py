@@ -275,11 +275,21 @@ def main():
     log.info(f"Loaded {len(sentences)} sentence(s) from {args.sentences}")
 
     # ── Load IMS-Toucan ───────────────────────────────────────────────────────
+    # IMS-Toucan resolves model paths relative to its own directory (e.g.
+    # "Models/ToucanTTS_Meta/best.pt"), so we must chdir there before init.
+    import os  # noqa: PLC0415
     log.info(f"Importing IMS-Toucan from: {args.toucan_dir}")
     ToucanTTSInterface = import_toucan(args.toucan_dir)
 
-    log.info(f"Initializing IMS-Toucan (model={args.toucan_model}) on {device}…")
-    tts = ToucanTTSInterface(device=device, tts_model_path=args.toucan_model)
+    toucan_abs = str(Path(args.toucan_dir).resolve())
+    original_dir = os.getcwd()
+    log.info(f"Changing CWD to {toucan_abs} for IMS-Toucan model resolution…")
+    os.chdir(toucan_abs)
+    try:
+        log.info(f"Initializing IMS-Toucan (model={args.toucan_model}) on {device}…")
+        tts = ToucanTTSInterface(device=device, tts_model_path=args.toucan_model)
+    finally:
+        os.chdir(original_dir)
     log.info("IMS-Toucan ready.")
 
     # ── Synthesis loop ────────────────────────────────────────────────────────
