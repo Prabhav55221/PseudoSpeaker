@@ -357,7 +357,7 @@ def main():
         kl_values = compute_kl_real_vs_predicted(
             real_embeddings_by_group,
             group_gmm_params,
-            n_components=15,
+            n_components=8,
             num_mc_samples=args.num_mc_samples,
             seed=args.seed,
             device=args.device,

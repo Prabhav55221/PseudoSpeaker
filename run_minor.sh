@@ -10,7 +10,6 @@
 #SBATCH --mem-per-cpu=16G
 #SBATCH --gpus=1
 #SBATCH --partition=gpu
-#SBATCH --account=a100acct
 #SBATCH --mail-user="psingh54@jhu.edu"
 
 # GMM-MDN Training Script for Cluster Execution
@@ -51,7 +50,7 @@ mkdir -p "$OUTPUT_DIR"
 mkdir -p logs
 
 # Training hyperparameters
-NUM_GMM_COMPONENTS=15
+NUM_GMM_COMPONENTS=10
 BATCH_SIZE=32  # Increased for A100 80GB (was 64, can handle much more)
 EPOCHS=100
 LR=1e-4
@@ -180,7 +179,8 @@ python scripts/train.py \
     --save_interval 5 \
     --scheduler_patience 5 \
     --scheduler_factor 0.5 \
-    --early_stopping_patience 10 \
+    --early_stopping_patience 30 \
+    --contrastive_weight 0.2 \
     --seed 42 \
     -vv
 

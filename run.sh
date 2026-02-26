@@ -4,10 +4,10 @@
 # 2024, Johns Hopkins University (Author: Prabhav Singh)
 # Apache 2.0.
 
-#SBATCH --job-name=gmm_mdn
+#SBATCH --job-name=gmm_mdn_large
 
 #SBATCH --nodes=1
-#SBATCH --mem-per-cpu=32G
+#SBATCH --mem-per-cpu=16G
 #SBATCH --gpus=1
 #SBATCH --partition=gpu-a100
 #SBATCH --account=a100acct
@@ -51,14 +51,14 @@ mkdir -p "$OUTPUT_DIR"
 mkdir -p logs
 
 # Training hyperparameters
-NUM_GMM_COMPONENTS=15
-BATCH_SIZE=64  # Increased for A100 80GB (was 64, can handle much more)
+NUM_GMM_COMPONENTS=8
+BATCH_SIZE=32  # Increased for A100 80GB (was 64, can handle much more)
 EPOCHS=100
 LR=1e-4
 HIDDEN_DIM=512
 
 # System settings
-NUM_WORKERS=8  # Increased for better CPU utilization (was 8)
+NUM_WORKERS=4  # Increased for better CPU utilization (was 8)
 DEVICE="cuda"
 
 # ============================================================================
@@ -177,11 +177,11 @@ python scripts/train.py \
     --device "$DEVICE" \
     --output_dir "$OUTPUT_DIR" \
     --log_interval 100 \
-    --save_interval 5 \
+    --save_interval 1 \
     --scheduler_patience 5 \
     --scheduler_factor 0.5 \
-    --early_stopping_patience 10 \
-    --contrastive_weight 0.1 \
+    --early_stopping_patience 30 \
+    --contrastive_weight 0.2 \
     --seed 42 \
     -vv
 

@@ -7,7 +7,7 @@
 #SBATCH --job-name=gmm_analysis
 
 #SBATCH --nodes=1
-#SBATCH --mem-per-cpu=32G
+#SBATCH --mem-per-cpu=8G
 #SBATCH --gpus=1
 #SBATCH --partition=gpu
 #SBATCH --time=02:00:00
@@ -40,7 +40,7 @@ PROJECT_DIR="/export/fs06/psingh54/PseudoSpeaker"
 cd "$PROJECT_DIR"
 
 # Model checkpoint (update this to your trained model)
-CHECKPOINT="$PROJECT_DIR/outputs/20251128_221541/checkpoints/best_model.pth"
+CHECKPOINT="$PROJECT_DIR/outputs/20260210_121035/checkpoints/checkpoint_epoch_66.pth"
 
 # Data paths
 EMBEDDING_DIR="/home/tthebau1/SHADOW/iarpa-arts/recipes/voxceleb_eval/v3.6.xs/exp/xvectors/fbank80_stmn_fwseresnet34.v3.1_arts_srevox.s2/CapSpeech-real"
@@ -52,8 +52,8 @@ OUTPUT_DIR="$PROJECT_DIR/outputs/analysis_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUTPUT_DIR"
 
 # Analysis parameters
-MAX_PER_GROUP=200       # Max real embeddings per group
-NUM_GENERATED=200       # Generated embeddings per group for visualization
+MAX_PER_GROUP=600       # Max real embeddings per group
+NUM_GENERATED=600       # Generated embeddings per group for visualization
 NUM_MC_SAMPLES=10000    # Monte Carlo samples for KL/JSD
 TEMPERATURE=1.0         # Sampling temperature
 DEVICE="cuda"
