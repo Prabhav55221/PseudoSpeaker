@@ -56,12 +56,25 @@ class Trainer:
         self.config = config
         self.logger = logger
 
-        # Optimizer
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(),
-            lr=config.lr,
-            weight_decay=config.weight_decay
-        )
+        # Optimizer — separate LR for encoder (10x lower) when unfrozen
+        encoder_params = list(self.model.text_encoder.parameters())
+        encoder_param_ids = {id(p) for p in encoder_params}
+        head_params = [p for p in self.model.parameters() if id(p) not in encoder_param_ids]
+
+        if not config.freeze_encoder and encoder_params:
+            self.optimizer = torch.optim.Adam([
+                {'params': head_params, 'lr': config.lr},
+                {'params': encoder_params, 'lr': config.lr / 10},
+            ], weight_decay=config.weight_decay)
+            self.logger.info(
+                f"Optimizer: head lr={config.lr:.2e}, encoder lr={config.lr / 10:.2e}"
+            )
+        else:
+            self.optimizer = torch.optim.Adam(
+                self.model.parameters(),
+                lr=config.lr,
+                weight_decay=config.weight_decay
+            )
 
         # Learning rate scheduler (ReduceLROnPlateau)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -101,7 +114,7 @@ class Trainer:
 
         # Contrastive loss setup
         self.contrastive_weight = getattr(config, 'contrastive_weight', 0.0)
-        self.group_texts = []
+        self.all_group_texts = []   # list[list[str]] — all paraphrases per group
         self.group_name_to_idx = {}
 
         if self.contrastive_weight > 0:
@@ -109,12 +122,13 @@ class Trainer:
             with open(str(aug_path), 'r') as f:
                 augmented_texts = json.load(f)
             group_names = sorted(augmented_texts.keys())
-            # One representative text per group (index 0)
-            self.group_texts = [augmented_texts[g][0] for g in group_names]
+            # Store ALL paraphrases per group; sample randomly each batch
+            self.all_group_texts = [augmented_texts[g] for g in group_names]
             self.group_name_to_idx = {g: i for i, g in enumerate(group_names)}
             self.logger.info(
                 f"Contrastive loss enabled: weight={self.contrastive_weight}, "
-                f"groups={len(group_names)}"
+                f"groups={len(group_names)}, "
+                f"paraphrases_per_group={len(self.all_group_texts[0])}"
             )
 
     def train_epoch(self, epoch: int) -> float:
@@ -149,12 +163,16 @@ class Trainer:
             # Forward pass — NLL loss
             loss_nll = self.model.compute_loss(texts, embeddings)
 
-            # Contrastive loss
+            # Contrastive loss — sample one random paraphrase per group this batch
             loss_contrastive = torch.tensor(0.0, device=self.config.device)
             if self.contrastive_weight > 0 and attribute_group in self.group_name_to_idx:
                 target_idx = self.group_name_to_idx[attribute_group]
+                group_texts = [
+                    variants[torch.randint(len(variants), (1,)).item()]
+                    for variants in self.all_group_texts
+                ]
                 loss_contrastive = self.model.compute_contrastive_loss(
-                    embeddings, self.group_texts, target_idx,
+                    embeddings, group_texts, target_idx,
                 )
 
             loss = loss_nll + self.contrastive_weight * loss_contrastive

@@ -79,7 +79,7 @@ def compute_contrastive_nll(
     all_means: torch.Tensor,
     all_log_vars: torch.Tensor,
     target_group_idx: int,
-    temperature: float = 0.07,
+    temperature: float = 1.0,
 ) -> torch.Tensor:
     """
     Cross-group contrastive loss via GMM log-likelihoods.

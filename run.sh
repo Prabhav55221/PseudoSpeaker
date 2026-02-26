@@ -172,7 +172,7 @@ python scripts/train.py \
     --lr "$LR" \
     --weight_decay 1e-5 \
     --grad_clip 1.0 \
-    --freeze_encoder \
+    --finetune_encoder \
     --num_workers "$NUM_WORKERS" \
     --device "$DEVICE" \
     --output_dir "$OUTPUT_DIR" \
@@ -181,7 +181,7 @@ python scripts/train.py \
     --scheduler_patience 5 \
     --scheduler_factor 0.5 \
     --early_stopping_patience 30 \
-    --contrastive_weight 0.2 \
+    --contrastive_weight 0.05 \
     --seed 42 \
     -vv
 
