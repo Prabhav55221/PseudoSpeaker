@@ -297,8 +297,7 @@ def main():
     log.info(f"Synthesizing {total_wavs} WAVs "
              f"({len(entries)} embeddings × {len(sentences)} sentences)")
 
-    import tempfile  # noqa: PLC0415
-    import torch     # noqa: PLC0415
+    import torch  # noqa: PLC0415
 
     wav_count = 0
     for group, sample_idx, spk_emb in entries:
@@ -306,14 +305,12 @@ def main():
         group_dir = output_dir / safe_group
         group_dir.mkdir(parents=True, exist_ok=True)
 
-        # set_utterance_embedding expects a path to a .pt file, not a numpy array
-        with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp:
-            tmp_path = tmp.name
-        torch.save(torch.tensor(spk_emb, dtype=torch.float32), tmp_path)
-        try:
-            tts.set_utterance_embedding(tmp_path)
-        finally:
-            os.unlink(tmp_path)
+        # IMS-Toucan's set_utterance_embedding() reads a WAV file and runs its
+        # own speaker encoder — not what we want.  Instead, directly assign our
+        # pre-computed 192-dim embedding as the utterance_embedding tensor.
+        # Shape must be [1, 192] (batch dim) on the TTS device.
+        emb_tensor = torch.tensor(spk_emb, dtype=torch.float32).unsqueeze(0).to(device)
+        tts.utterance_embedding = emb_tensor
 
         for utt_idx, sentence in enumerate(sentences):
             out_filename = build_output_filename(group, sample_idx, utt_idx)
