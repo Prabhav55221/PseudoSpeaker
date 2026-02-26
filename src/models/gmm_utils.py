@@ -137,6 +137,123 @@ def compute_contrastive_nll(
     return loss
 
 
+def compute_centroid_loss(
+    weights: torch.Tensor,
+    means: torch.Tensor,
+    target_embeddings: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Centroid matching loss: forces the GMM mixture mean to point toward
+    the actual group embedding centroid computed from the batch.
+
+    Because the batch sampler puts one group per batch, the batch mean IS
+    the group centroid.  This directly anchors each group's GMM to its own
+    region of the embedding space — the key signal missing from NLL alone.
+
+    Uses cosine similarity so the loss scale is [0, 2] regardless of
+    embedding magnitude.
+
+    Args:
+        weights:           [B, K] unnormalized mixing weights
+        means:             [B, K, D] GMM component means
+        target_embeddings: [B, D] real embeddings for the batch group
+
+    Returns:
+        Centroid loss scalar (0 = perfect alignment, 2 = opposite directions)
+    """
+    import torch.nn.functional as F  # already imported at top, safe re-import
+
+    # GMM mixture mean per sample: weighted sum of component means
+    log_w = F.log_softmax(weights, dim=1)      # [B, K]
+    w = torch.exp(log_w)                        # [B, K]
+    mixture_means = torch.einsum("bk,bkd->bd", w, means)  # [B, D]
+
+    # Aggregate over batch (all from same group)
+    predicted_centroid = mixture_means.mean(dim=0)         # [D]
+    target_centroid = target_embeddings.mean(dim=0).detach()  # [D]
+
+    # Cosine similarity loss: 1 - cos_sim ∈ [0, 2]
+    cos_sim = F.cosine_similarity(
+        predicted_centroid.unsqueeze(0),
+        target_centroid.unsqueeze(0)
+    )
+    return 1.0 - cos_sim.squeeze()
+
+
+def compute_mean_repulsion_loss(
+    all_means: torch.Tensor,
+    all_weights: torch.Tensor,
+    group_names: list,
+    pitch_margin: float = 0.30,
+    rate_margin: float = 0.20,
+) -> torch.Tensor:
+    """
+    Repulsion loss that pushes GMM centroids of same-gender groups apart.
+
+    For each pair sharing the same gender:
+      - Different pitch: hinge loss if cosine_sim > (1 - pitch_margin)
+      - Different rate:  hinge loss if cosine_sim > (1 - rate_margin)
+
+    This directly encourages the model to encode pitch and speaking-rate
+    differences in the embedding space, not just gender.
+
+    Args:
+        all_means:    [G, K, D] GMM component means (one row per group)
+        all_weights:  [G, K]   unnormalized mixing weights
+        group_names:  list of G group-name strings (sorted, matches rows)
+        pitch_margin: desired angular separation for pitch flips
+        rate_margin:  desired angular separation for rate flips
+
+    Returns:
+        Repulsion loss scalar (0 if no same-gender pairs in batch)
+    """
+    G, K, D = all_means.shape
+
+    # Compute mixture-weighted centroid for each group: [G, D]
+    log_w = F.log_softmax(all_weights, dim=1)          # [G, K]
+    w = torch.exp(log_w)                                # [G, K]
+    centroids = torch.einsum("gk,gkd->gd", w, all_means)  # [G, D]
+    centroids = F.normalize(centroids, dim=1)           # unit sphere
+
+    # Pairwise cosine similarity matrix: [G, G]
+    cos_sim = torch.mm(centroids, centroids.t())        # [G, G]
+
+    def _attrs(name):
+        parts = [p.strip() for p in name.split(",")]
+        gender = parts[0]
+        pitch = "high" if "high" in parts[1] else ("low" if "low" in parts[1] else "medium")
+        rate = "fast" if "fast" in parts[2] else ("slow" if "slow" in parts[2] else "measured")
+        return gender, pitch, rate
+
+    total_loss = torch.zeros(1, device=all_means.device)
+    count = 0
+
+    for i in range(G):
+        gi, pi, ri = _attrs(group_names[i])
+        for j in range(i + 1, G):
+            gj, pj, rj = _attrs(group_names[j])
+
+            if gi != gj:
+                continue  # Different genders: already well-separated
+
+            sim = cos_sim[i, j]
+
+            if pi != pj:
+                # Same gender, different pitch: push apart
+                total_loss = total_loss + F.relu(sim - (1.0 - pitch_margin))
+                count += 1
+
+            if ri != rj:
+                # Same gender, different rate: push apart
+                total_loss = total_loss + F.relu(sim - (1.0 - rate_margin))
+                count += 1
+
+    if count == 0:
+        return torch.zeros(1, device=all_means.device).squeeze()
+
+    return (total_loss / count).squeeze()
+
+
 def sample_from_gmm(
     weights: torch.Tensor,
     means: torch.Tensor,

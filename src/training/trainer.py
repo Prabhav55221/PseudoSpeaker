@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from ..models.gmm_mdn import GMMMDN
-from ..models.gmm_utils import validate_gmm_params
+from ..models.gmm_utils import validate_gmm_params, compute_contrastive_nll, compute_mean_repulsion_loss, compute_centroid_loss
 from ..utils.logger import MetricsLogger
 from ..utils.config import GMMMDNConfig
 from .evaluator import Evaluator
@@ -112,23 +112,26 @@ class Trainer:
         self.current_epoch = 0
         self.global_step = 0
 
-        # Contrastive loss setup
+        # Contrastive + repulsion + centroid loss setup
         self.contrastive_weight = getattr(config, 'contrastive_weight', 0.0)
+        self.repulsion_weight = getattr(config, 'repulsion_weight', 0.0)
+        self.centroid_weight = getattr(config, 'centroid_weight', 0.0)
         self.all_group_texts = []   # list[list[str]] — all paraphrases per group
         self.group_name_to_idx = {}
+        self.group_names = []
 
-        if self.contrastive_weight > 0:
+        if self.contrastive_weight > 0 or self.repulsion_weight > 0:
             aug_path = config.augmented_texts_path
             with open(str(aug_path), 'r') as f:
                 augmented_texts = json.load(f)
-            group_names = sorted(augmented_texts.keys())
+            self.group_names = sorted(augmented_texts.keys())
             # Store ALL paraphrases per group; sample randomly each batch
-            self.all_group_texts = [augmented_texts[g] for g in group_names]
-            self.group_name_to_idx = {g: i for i, g in enumerate(group_names)}
+            self.all_group_texts = [augmented_texts[g] for g in self.group_names]
+            self.group_name_to_idx = {g: i for i, g in enumerate(self.group_names)}
             self.logger.info(
-                f"Contrastive loss enabled: weight={self.contrastive_weight}, "
-                f"groups={len(group_names)}, "
-                f"paraphrases_per_group={len(self.all_group_texts[0])}"
+                f"Diversity losses: contrastive={self.contrastive_weight}, "
+                f"repulsion={self.repulsion_weight}, "
+                f"groups={len(self.group_names)}"
             )
 
     def train_epoch(self, epoch: int) -> float:
@@ -160,22 +163,44 @@ class Trainer:
         for texts, embeddings, audio_ids, attribute_group in pbar:
             embeddings = embeddings.to(self.config.device)
 
-            # Forward pass — NLL loss
-            loss_nll = self.model.compute_loss(texts, embeddings)
+            # Forward pass — NLL loss + centroid loss (same forward pass)
+            weights, means, log_vars = self.model.forward(texts)
+            from ..models.gmm_utils import compute_gmm_nll  # noqa: PLC0415
+            loss_nll = compute_gmm_nll(embeddings, weights, means, log_vars)
 
-            # Contrastive loss — sample one random paraphrase per group this batch
+            loss_centroid = torch.tensor(0.0, device=self.config.device)
+            if self.centroid_weight > 0:
+                loss_centroid = compute_centroid_loss(weights, means, embeddings)
+
+            # Contrastive + repulsion losses — one forward pass over all 18 groups
             loss_contrastive = torch.tensor(0.0, device=self.config.device)
-            if self.contrastive_weight > 0 and attribute_group in self.group_name_to_idx:
-                target_idx = self.group_name_to_idx[attribute_group]
+            loss_repulsion = torch.tensor(0.0, device=self.config.device)
+
+            if (self.contrastive_weight > 0 or self.repulsion_weight > 0) \
+                    and attribute_group in self.group_name_to_idx:
+
+                # One forward pass: get GMM params for all groups
                 group_texts = [
                     variants[torch.randint(len(variants), (1,)).item()]
                     for variants in self.all_group_texts
                 ]
-                loss_contrastive = self.model.compute_contrastive_loss(
-                    embeddings, group_texts, target_idx,
-                )
+                all_w, all_m, all_lv = self.model(group_texts)  # [G,K], [G,K,D], [G,K,D]
 
-            loss = loss_nll + self.contrastive_weight * loss_contrastive
+                if self.contrastive_weight > 0:
+                    target_idx = self.group_name_to_idx[attribute_group]
+                    loss_contrastive = compute_contrastive_nll(
+                        embeddings, all_w, all_m, all_lv, target_idx
+                    )
+
+                if self.repulsion_weight > 0:
+                    loss_repulsion = compute_mean_repulsion_loss(
+                        all_m, all_w, self.group_names
+                    )
+
+            loss = (loss_nll
+                    + self.centroid_weight * loss_centroid
+                    + self.contrastive_weight * loss_contrastive
+                    + self.repulsion_weight * loss_repulsion)
 
             # Check for NaN loss
             if torch.isnan(loss):

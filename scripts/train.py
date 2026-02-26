@@ -126,6 +126,18 @@ def parse_args():
         default=0.0,
         help="Weight for cross-group contrastive loss (0 = disabled) (default: 0.0)"
     )
+    parser.add_argument(
+        "--repulsion_weight",
+        type=float,
+        default=0.0,
+        help="Weight for inter-group GMM mean repulsion loss (0 = disabled) (default: 0.0)"
+    )
+    parser.add_argument(
+        "--centroid_weight",
+        type=float,
+        default=0.0,
+        help="Weight for per-group GMM centroid matching loss (0 = disabled) (default: 0.0)"
+    )
 
     # System
     parser.add_argument(
@@ -261,6 +273,8 @@ def main():
         weight_decay=args.weight_decay,
         grad_clip=args.grad_clip,
         contrastive_weight=args.contrastive_weight,
+        repulsion_weight=args.repulsion_weight,
+        centroid_weight=args.centroid_weight,
         device=args.device,
         num_workers=args.num_workers,
         seed=args.seed,
