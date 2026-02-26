@@ -40,7 +40,7 @@ PROJECT_DIR="/export/fs06/psingh54/PseudoSpeaker"
 cd "$PROJECT_DIR"
 
 # Model checkpoint (update this to your trained model)
-CHECKPOINT="$PROJECT_DIR/outputs/20260210_121035/checkpoints/checkpoint_epoch_66.pth"
+CHECKPOINT="$PROJECT_DIR/outputs/20260226_070135/checkpoints/best_model.pth"
 
 # Data paths
 EMBEDDING_DIR="/home/tthebau1/SHADOW/iarpa-arts/recipes/voxceleb_eval/v3.6.xs/exp/xvectors/fbank80_stmn_fwseresnet34.v3.1_arts_srevox.s2/CapSpeech-real"

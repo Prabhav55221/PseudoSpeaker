@@ -172,7 +172,7 @@ python scripts/train.py \
     --lr "$LR" \
     --weight_decay 1e-5 \
     --grad_clip 1.0 \
-    --finetune_encoder \
+    --freeze_encoder \
     --num_workers "$NUM_WORKERS" \
     --device "$DEVICE" \
     --output_dir "$OUTPUT_DIR" \
