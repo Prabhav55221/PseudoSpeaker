@@ -55,6 +55,7 @@ mkdir -p "$OUTPUT_DIR"
 MAX_PER_GROUP=600       # Max real embeddings per group
 NUM_GENERATED=600       # Generated embeddings per group for visualization
 NUM_MC_SAMPLES=10000    # Monte Carlo samples for KL/JSD
+NUM_KDE_SAMPLES=50      # Embeddings sampled per group for KDE distribution plot
 TEMPERATURE=1.0         # Sampling temperature
 DEVICE="cuda"
 SEED=42
@@ -122,7 +123,7 @@ echo ""
 echo "=================================================="
 echo "Starting Analysis"
 echo "=================================================="
-echo "Analyses: 2.5 (visualization), 2.6 (GMM comparison), 2.7 (classification), 2.1 (KL divergence)"
+echo "Analyses: 2.5 (visualization), 2.6 (GMM comparison), 2.7 (classification), 2.1 (KL divergence), 2.8 (embedding KDE)"
 echo "Max per group: $MAX_PER_GROUP"
 echo "Num generated: $NUM_GENERATED"
 echo "MC samples: $NUM_MC_SAMPLES"
@@ -135,10 +136,11 @@ python scripts/analyze_model.py \
     --mapping_dir "$MAPPING_DIR" \
     --augmented_texts "$AUGMENTED_TEXTS" \
     --output_dir "$OUTPUT_DIR" \
-    --analyses 2.5 2.6 2.7 2.1 \
+    --analyses 2.5 2.6 2.7 2.1 2.8 \
     --max_per_group "$MAX_PER_GROUP" \
     --num_generated "$NUM_GENERATED" \
     --num_mc_samples "$NUM_MC_SAMPLES" \
+    --num_kde_samples "$NUM_KDE_SAMPLES" \
     --temperature "$TEMPERATURE" \
     --device "$DEVICE" \
     --seed "$SEED" \

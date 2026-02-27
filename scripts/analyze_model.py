@@ -90,6 +90,10 @@ def parse_args():
         help="MC samples for KL/JSD estimation",
     )
     parser.add_argument(
+        "--num_kde_samples", type=int, default=50,
+        help="Embeddings sampled per group for KDE distribution plot (analysis 2.8)",
+    )
+    parser.add_argument(
         "--temperature", type=float, default=1.0,
         help="Sampling temperature",
     )
@@ -206,6 +210,7 @@ def main():
         plot_gmm_distance_heatmap,
         plot_opposite_pair_bars,
         plot_kl_divergence_bars,
+        plot_embedding_kde,
         generate_report,
     )
 
@@ -298,7 +303,7 @@ def main():
         plot_confusion_matrix(
             rc_self["confusion_matrix"],
             group_names,
-            "Self-Consistency: Generated Embeddings",
+            "Reverse Classification: Generated Embeddings",
             str(plots_dir / "confusion_self.png"),
             normalize=True,
         )
@@ -373,6 +378,35 @@ def main():
 
         results["kl_divergence"] = kl_values
         logger.info("2.1 complete")
+
+    # --- 2.8: Embedding KDE distribution ---
+    if "2.8" in args.analyses:
+        logger.info("-" * 40)
+        logger.info("Running 2.8: Embedding Distribution (KDE)")
+        logger.info("-" * 40)
+
+        num_kde = args.num_kde_samples
+        logger.info(f"Sampling {num_kde} embeddings per group from GMM-MDN...")
+
+        sampled_embs = {}
+        for group in group_names:
+            condition_text = augmented_texts[group][0]
+            with torch.no_grad():
+                emb = model.sample(
+                    text=condition_text,
+                    num_samples=num_kde,
+                    temperature=args.temperature,
+                )
+            sampled_embs[group] = emb.cpu().numpy()  # [num_kde, D]
+            logger.debug(f"  {group}: sampled {num_kde} embeddings")
+
+        plot_embedding_kde(
+            sampled_embs,
+            str(plots_dir / "embedding_kde.png"),
+        )
+
+        results["embedding_kde"] = {"num_samples_per_group": num_kde}
+        logger.info("2.8 complete")
 
     # =========================================================================
     # Phase 3: Generate report

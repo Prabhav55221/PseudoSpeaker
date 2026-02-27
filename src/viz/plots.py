@@ -549,6 +549,123 @@ def generate_report(
 
 
 # =============================================================================
+# 2.8 — Embedding distribution (KDE)
+# =============================================================================
+
+def plot_embedding_kde(
+    sampled_embeddings: Dict[str, np.ndarray],
+    save_path: str,
+) -> None:
+    """
+    Smoothed KDE of GMM-MDN sampled embeddings, faceted by attribute.
+
+    Projects all embeddings to the first PCA component, then aggregates
+    across groups sharing the same attribute value (gender / pitch / rate)
+    so each panel shows 2-3 clean curves rather than 18 noisy ones.
+
+    Args:
+        sampled_embeddings: group_name -> [N, D] array of sampled embeddings
+        save_path: output image path
+    """
+    from scipy.stats import gaussian_kde
+    from sklearn.decomposition import PCA
+
+    # ── PCA projection ────────────────────────────────────────────────────────
+    all_embs = np.vstack(list(sampled_embeddings.values()))
+    pca = PCA(n_components=1, random_state=42)
+    all_proj = pca.fit_transform(all_embs).ravel()
+
+    idx = 0
+    group_proj: Dict[str, np.ndarray] = {}
+    for group, embs in sampled_embeddings.items():
+        n = len(embs)
+        group_proj[group] = all_proj[idx : idx + n]
+        idx += n
+
+    # ── Aggregate by attribute value ─────────────────────────────────────────
+    def _get_attrs(group: str):
+        parts = [p.strip() for p in group.split(",")]
+        return (
+            parts[0] if len(parts) > 0 else "?",
+            parts[1] if len(parts) > 1 else "?",
+            parts[2] if len(parts) > 2 else "?",
+        )
+
+    def _aggregate(attr_idx: int) -> Dict[str, np.ndarray]:
+        buckets: Dict[str, list] = {}
+        for group, proj in group_proj.items():
+            key = _get_attrs(group)[attr_idx]
+            buckets.setdefault(key, []).extend(proj.tolist())
+        return {k: np.array(v) for k, v in buckets.items()}
+
+    panels = [
+        (
+            _aggregate(0),
+            {"male": "#4472C4", "female": "#ED7D31"},
+            "Gender",
+        ),
+        (
+            _aggregate(1),
+            {
+                "high-pitched": "#C00000",
+                "medium-pitched": "#7030A0",
+                "low-pitched": "#00B0F0",
+            },
+            "Pitch",
+        ),
+        (
+            _aggregate(2),
+            {
+                "fast speed": "#E84040",
+                "measured speed": "#F0A800",
+                "slow speed": "#3BAA55",
+            },
+            "Speaking Rate",
+        ),
+    ]
+
+    # ── KDE grid ─────────────────────────────────────────────────────────────
+    x_pad = (all_proj.max() - all_proj.min()) * 0.15
+    x_grid = np.linspace(all_proj.min() - x_pad, all_proj.max() + x_pad, 400)
+
+    # ── Plot ─────────────────────────────────────────────────────────────────
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    for ax, (attr_data, color_map, attr_label) in zip(axes, panels):
+        for attr_val, proj_vals in sorted(attr_data.items()):
+            if len(proj_vals) < 2:
+                continue
+            color = color_map.get(attr_val, "#888888")
+            try:
+                kde = gaussian_kde(proj_vals, bw_method="silverman")
+                density = kde(x_grid)
+                density = density / density.max()  # normalise to [0, 1]
+                ax.plot(
+                    x_grid, density,
+                    color=color, linewidth=2.2, label=attr_val,
+                )
+                ax.fill_between(x_grid, density, alpha=0.12, color=color)
+            except Exception:
+                pass
+
+        ax.set_xlabel("PCA Component 1", fontsize=10)
+        ax.set_ylabel("Density (normalised)", fontsize=10)
+        ax.set_title(f"By {attr_label}", fontsize=12)
+        ax.legend(fontsize=8, framealpha=0.9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    fig.suptitle(
+        "Sampled Embedding Distributions (GMM-MDN, smoothed KDE)",
+        fontsize=14,
+    )
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"Saved: {save_path}")
+
+
+# =============================================================================
 # Helpers
 # =============================================================================
 
