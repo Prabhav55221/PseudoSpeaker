@@ -305,12 +305,35 @@ def main():
         group_dir = output_dir / safe_group
         group_dir.mkdir(parents=True, exist_ok=True)
 
-        # IMS-Toucan's set_utterance_embedding() reads a WAV file and runs its
-        # own speaker encoder — not what we want.  Instead, directly assign our
-        # pre-computed 192-dim embedding as the utterance_embedding tensor.
-        # Shape must be [1, 192] (batch dim) on the TTS device.
-        emb_tensor = torch.tensor(spk_emb, dtype=torch.float32).unsqueeze(0).to(device)
-        tts.utterance_embedding = emb_tensor
+        # Inject pre-computed 192-dim speaker embedding into IMS-Toucan.
+        #
+        # Strategy (tried in order):
+        #   1. set_utterance_embedding(embedding=tensor) — clean API in recent
+        #      Toucan versions; handles shape/detach internally.
+        #   2. Direct attribute assignment as fallback — works if Toucan stores
+        #      embeddings as [1, D] tensors on the model device.
+        #
+        # We store both [D] and [1, D] shapes; Toucan squeeze/unsqueezes as
+        # needed depending on version.
+        emb_1d = torch.tensor(spk_emb, dtype=torch.float32).to(device)   # [192]
+        emb_2d = emb_1d.unsqueeze(0)                                       # [1, 192]
+
+        injected = False
+        try:
+            # Preferred: let Toucan handle reshape/detach internally
+            import inspect
+            sig = inspect.signature(tts.set_utterance_embedding)
+            if "embedding" in sig.parameters:
+                tts.set_utterance_embedding(embedding=emb_2d)
+                injected = True
+        except Exception:
+            pass
+
+        if not injected:
+            # Fallback: direct attribute assignment
+            tts.utterance_embedding = emb_2d
+
+        log.debug(f"  emb norm={emb_1d.norm().item():.4f}  shape={tts.utterance_embedding.shape}")
 
         for utt_idx, sentence in enumerate(sentences):
             out_filename = build_output_filename(group, sample_idx, utt_idx)
