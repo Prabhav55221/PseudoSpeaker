@@ -549,6 +549,127 @@ def generate_report(
 
 
 # =============================================================================
+# 2.9 — 2D LDA projection + seaborn KDE contours
+# =============================================================================
+
+def plot_embedding_2d_lda(
+    sampled_embeddings: Dict[str, np.ndarray],
+    save_path: str,
+) -> None:
+    """
+    2D LDA-projected embeddings with seaborn KDE contours, one panel per attribute.
+
+    - Gender  (2 classes): 1 LDA component paired with PCA-2
+    - Pitch   (3 classes): 2 LDA components → natural 2D
+    - Rate    (3 classes): 2 LDA components → natural 2D
+
+    Args:
+        sampled_embeddings: group_name -> [N, D] array of sampled embeddings
+        save_path: output image path
+    """
+    try:
+        import seaborn as sns
+    except ImportError:
+        logger.warning("seaborn not installed — skipping 2D LDA plot")
+        return
+
+    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+    from sklearn.decomposition import PCA
+
+    # ── Stack all embeddings with per-point attribute labels ──────────────────
+    all_embs, all_groups = [], []
+    for group, embs in sampled_embeddings.items():
+        all_embs.append(embs)
+        all_groups.extend([group] * len(embs))
+    all_embs = np.vstack(all_embs)
+
+    def _get_attrs(group: str):
+        parts = [p.strip() for p in group.split(",")]
+        return (
+            parts[0] if len(parts) > 0 else "?",
+            parts[1] if len(parts) > 1 else "?",
+            parts[2] if len(parts) > 2 else "?",
+        )
+
+    gender_labels = np.array([_get_attrs(g)[0] for g in all_groups])
+    pitch_labels  = np.array([_get_attrs(g)[1] for g in all_groups])
+    rate_labels   = np.array([_get_attrs(g)[2] for g in all_groups])
+
+    panels = [
+        (
+            gender_labels,
+            {"male": "#4472C4", "female": "#ED7D31"},
+            "Gender",
+        ),
+        (
+            pitch_labels,
+            {"high-pitched": "#C00000", "medium-pitched": "#7030A0", "low-pitched": "#00B0F0"},
+            "Pitch",
+        ),
+        (
+            rate_labels,
+            {"fast speed": "#E84040", "measured speed": "#F0A800", "slow speed": "#3BAA55"},
+            "Speaking Rate",
+        ),
+    ]
+
+    # ── Pre-compute PCA-2 for the gender panel (LDA gives only 1 component) ──
+    pca2 = PCA(n_components=2, random_state=42).fit_transform(all_embs)
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    sns.set_style("whitegrid")
+
+    for ax, (labels, color_map, attr_label) in zip(axes, panels):
+        n_classes    = len(np.unique(labels))
+        n_components = min(n_classes - 1, 2)
+
+        lda       = LDA(n_components=n_components)
+        lda_proj  = lda.fit_transform(all_embs, labels)
+
+        if n_components == 1:
+            # Gender: pair single LDA component with PCA-2
+            coords = np.column_stack([lda_proj.ravel(), pca2[:, 1]])
+            xlabel, ylabel = "LDA 1 (gender axis)", "PCA 2"
+        else:
+            coords = lda_proj
+            xlabel, ylabel = "LDA 1", "LDA 2"
+
+        for attr_val in sorted(np.unique(labels)):
+            mask  = labels == attr_val
+            color = color_map.get(attr_val, "#888888")
+            try:
+                # Filled contour
+                sns.kdeplot(
+                    x=coords[mask, 0], y=coords[mask, 1],
+                    fill=True, alpha=0.20, color=color, levels=5, ax=ax,
+                )
+                # Outline contour with label
+                sns.kdeplot(
+                    x=coords[mask, 0], y=coords[mask, 1],
+                    fill=False, alpha=0.85, color=color, levels=5, ax=ax,
+                    label=attr_val,
+                )
+            except Exception:
+                pass
+
+        ax.set_xlabel(xlabel, fontsize=10)
+        ax.set_ylabel(ylabel, fontsize=10)
+        ax.set_title(f"By {attr_label}", fontsize=12)
+        ax.legend(fontsize=8, framealpha=0.9)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    fig.suptitle(
+        "Embedding Space: LDA Projection + 2D KDE Contours (GMM-MDN samples)",
+        fontsize=14,
+    )
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"Saved: {save_path}")
+
+
+# =============================================================================
 # 2.8 — Embedding distribution (KDE)
 # =============================================================================
 

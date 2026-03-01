@@ -211,6 +211,7 @@ def main():
         plot_opposite_pair_bars,
         plot_kl_divergence_bars,
         plot_embedding_kde,
+        plot_embedding_2d_lda,
         generate_report,
     )
 
@@ -379,10 +380,10 @@ def main():
         results["kl_divergence"] = kl_values
         logger.info("2.1 complete")
 
-    # --- 2.8: Embedding KDE distribution ---
+    # --- 2.8: Embedding KDE distribution + 2D LDA contours ---
     if "2.8" in args.analyses:
         logger.info("-" * 40)
-        logger.info("Running 2.8: Embedding Distribution (KDE)")
+        logger.info("Running 2.8: Embedding Distributions (1D KDE + 2D LDA KDE)")
         logger.info("-" * 40)
 
         num_kde = args.num_kde_samples
@@ -400,12 +401,32 @@ def main():
             sampled_embs[group] = emb.cpu().numpy()  # [num_kde, D]
             logger.debug(f"  {group}: sampled {num_kde} embeddings")
 
+        # ── 1D smoothed KDE (existing plot) ──────────────────────────────────
         plot_embedding_kde(
             sampled_embs,
             str(plots_dir / "embedding_kde.png"),
         )
 
-        results["embedding_kde"] = {"num_samples_per_group": num_kde}
+        # ── 2D LDA projection + seaborn contours ─────────────────────────────
+        plot_embedding_2d_lda(
+            sampled_embs,
+            str(plots_dir / "embedding_lda_kde.png"),
+        )
+
+        # ── Save raw embeddings for local re-plotting ─────────────────────────
+        # Shape: embeddings[i] = [num_kde, D] for group groups[i]
+        npz_path = output_dir / "sampled_embeddings.npz"
+        np.savez(
+            str(npz_path),
+            embeddings=np.stack(list(sampled_embs.values())),  # [G, N, D]
+            groups=np.array(list(sampled_embs.keys())),        # [G] str
+        )
+        logger.info(f"Saved embeddings for local use: {npz_path}")
+
+        results["embedding_kde"] = {
+            "num_samples_per_group": num_kde,
+            "npz_file": "sampled_embeddings.npz",
+        }
         logger.info("2.8 complete")
 
     # =========================================================================
